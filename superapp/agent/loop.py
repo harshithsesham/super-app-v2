@@ -85,7 +85,7 @@ class Agent:
             self.role, tz=self.tz, assistant=self.assistant_name(),
             runtime_section=REGISTRY.runtime_section(self.exclude_ns),
             standing_files="## Runtime Files (injected)\n" + self.memory.standing_files_section(),
-            skills_section=skills_catalog.section(), depth=self.depth)
+            skills_section=skills_catalog.section(self.memory.home), depth=self.depth)
         return assembler.assemble("chat" if self.role == "chat" else "subagent", ctx)
 
     # ---------------------------------------------------------- compaction --
@@ -119,6 +119,7 @@ class Agent:
                 self.status = "idle" if not self.closed else "closed"
 
     def _run_turn(self, user_text: str | None) -> str:
+        CONFIG.set_home(self.memory.home)  # tools resolve ~ against this agent's home on this thread
         self._drain_inbox()
         if user_text is not None:
             self.transcript.append({"role": "user", "content": f"{self._time_tag()}\n{user_text}"})

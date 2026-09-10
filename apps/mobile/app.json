@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "Super App",
+    "slug": "super-app",
+    "version": "0.2.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F4F5F7",
+    "newArchEnabled": true,
+    "scheme": "superapp",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.harshith.superapp",
+      "appleTeamId": "JAUSPN67UY",
+      "buildNumber": "55",
+      "infoPlist": { "ITSAppUsesNonExemptEncryption": false }
+    },
+    "android": {
+      "package": "com.harshith.superapp"
+    },
+    "extra": {
+      "apiUrl": "https://app.nutrishiksha.com/muse"
+    }
+  }
+}

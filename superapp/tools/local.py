@@ -4,13 +4,15 @@ Everything resolves relative to the agent's home directory.
 from __future__ import annotations
 import json, os, pathlib, subprocess, threading, time, uuid
 from .registry import REGISTRY, ToolError
-from ..config import CONFIG
+from ..config import CONFIG, REPO
 
 
 def _env() -> dict:
-    """Shell commands see the agent's home as HOME so `~` means the same thing in every tool."""
+    """Shell commands see the agent's home as HOME so `~` means the same thing in
+    every tool, and the repo's bin/ (connector CLIs like hatch_gws_cli) on PATH."""
     env = dict(os.environ)
     env["HOME"] = str(CONFIG.home)
+    env["PATH"] = str(REPO / "bin") + os.pathsep + env.get("PATH", "")
     return env
 
 

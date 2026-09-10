@@ -9,8 +9,10 @@ environment variables for secrets and paths:
   SUPERAPP_HOME     the agent's home directory (per user), default ~/.superapp/home
 """
 from __future__ import annotations
-import os, pathlib
+import contextvars, os, pathlib
 from dataclasses import dataclass, field
+
+_HOME: contextvars.ContextVar[pathlib.Path | None] = contextvars.ContextVar("superapp_home", default=None)
 import yaml
 from dotenv import load_dotenv
 
@@ -39,9 +41,14 @@ class Config:
 
     @property
     def home(self) -> pathlib.Path:
-        p = pathlib.Path(os.environ.get("SUPERAPP_HOME", "~/.superapp/home")).expanduser()
+        """The active agent's home. A server hosting several users sets it per turn with set_home()."""
+        override = _HOME.get()
+        p = override or pathlib.Path(os.environ.get("SUPERAPP_HOME", "~/.superapp/home")).expanduser()
         p.mkdir(parents=True, exist_ok=True)
         return p
+
+    def set_home(self, path: pathlib.Path | None):
+        _HOME.set(path)
 
     def effort(self, role: str = "root_agent") -> str:
         return self.home_yaml.get("llm", {}).get("reasoning", {}).get(role, {}).get("effort", "high")

@@ -20,8 +20,14 @@ def _frontmatter(p: pathlib.Path) -> dict:
         return {}
 
 
-def catalog() -> list[dict]:
-    statuses = {k.replace("_", "-"): v.get("status", "available")
+# skill directory -> vault provider whose presence means "connected"
+PROVIDER_FOR_SKILL = {"gmail": "gmail"}
+
+
+def catalog(home: pathlib.Path | None = None) -> list[dict]:
+    from ..connectors import vault
+    connected = set(vault.providers(home or CONFIG.home))
+    statuses = {k.replace("_", "-"): ("connected" if PROVIDER_FOR_SKILL.get(k.replace("_", "-")) in connected else "available")
                 for k, v in (CONFIG.skills_yaml.get("entries") or {}).items()}
     out = []
     for skill_md in sorted(CONFIG.skills_dir.rglob("SKILL.md")):
@@ -36,13 +42,13 @@ def catalog() -> list[dict]:
     return out
 
 
-def section() -> str:
+def section(home: pathlib.Path | None = None) -> str:
     lines = ["# Skills",
              "Skills are reproducible playbooks for a specific product, service, or task. Before a task that "
              "involves a product, service, or reusable workflow, find the matching skill below and read its "
              "SKILL.md with `muse.read` (absolute path given), then follow it exactly. Resolve relative paths "
              "against the skill's own directory. A skill marked `available` documents a connector that is not "
              "connected yet; check connection state live before treating it as connected."]
-    for s in catalog():
+    for s in catalog(home):
         lines.append(f"- `{s['name']}` ({s['status']}): {s['description']} — `{s['path']}`")
     return "\n".join(lines)

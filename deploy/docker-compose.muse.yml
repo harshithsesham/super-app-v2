@@ -1,0 +1,40 @@
+# The daemon, deployed next to the existing super-app stack on the same box.
+# It joins that stack's Docker network so its Caddy can proxy /muse/* to it.
+#
+#   docker compose -f deploy/docker-compose.muse.yml up -d --build
+#
+# Env: /opt/super-app/.env (existing Google OAuth client, vault key) first,
+# then /opt/super-app-v2/.env which overrides with the daemon's own values.
+services:
+  muse:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: muse-daemon
+    restart: unless-stopped
+    env_file:
+      - /opt/super-app/.env
+      - /opt/super-app-v2/.env
+    environment:
+      SUPERAPP_HOME_ROOT: /data/users
+      SUPERAPP_PORT: "18792"
+      SUPERAPP_INTERNAL_URL: http://127.0.0.1:18792
+    volumes:
+      - muse-data:/data
+      - hf-cache:/root/.cache
+    networks:
+      - deploy_default
+    mem_limit: 1200m
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:18792/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  muse-data:
+  hf-cache:
+
+networks:
+  deploy_default:
+    external: true

@@ -1,0 +1,5 @@
+#!/bin/sh
+# The Gmail command the skill playbook calls. Runs in the repo's venv from any
+# working directory; the agent's HOME (its vault) is untouched.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" exec "$ROOT/.venv/bin/python" -m superapp.connectors.gws_cli "$@"

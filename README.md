@@ -22,23 +22,44 @@ Model: Muse Spark 1.3 via the Meta Model API.
 | `db/schema.sql` | Postgres DDL for the 194-table runtime schema, generated from `skills/muse_db/references/schema.md` |
 | `reference/runtime-cell/` | container boot and supervision scripts from the original runtime |
 
+| `superapp/server.py` | the daemon: bearer auth, one warm agent per user, REST + WebSocket streaming, feed/ideas/goals |
+| `apps/mobile/` | Expo app in the Muse layout: chat thread, avatar with live status, Feed, Ideas, Goals, Library, Connectors, Memory, activity log |
+
 ## Run
 
 ```bash
-python3 -m venv .venv && ./.venv/bin/pip install -e ".[memory,db]"
+python3 -m venv .venv && ./.venv/bin/pip install -e ".[memory,db,server]"
 cp .env.example .env   # add META_API_KEY
-docker compose up -d   # postgres + qdrant
-./.venv/bin/python -m superapp.cli --show-prompt   # inspect the assembled prompt
-./.venv/bin/python -m superapp.cli --events
+./.venv/bin/python -m superapp.cli --events          # terminal chat
+SUPERAPP_API_TOKEN=dev-token ./.venv/bin/uvicorn superapp.server:app --host 0.0.0.0 --port 18792
 ```
+
+Mobile (simulator or Expo Go on a phone on the same network):
+
+```bash
+cd apps/mobile && npm install
+SUPERAPP_API_URL=http://localhost:18792 SUPERAPP_API_TOKEN=dev-token npx expo start --ios
+```
+
+Without those env vars the app shows a sign-in screen asking for the server URL and token.
 
 ## Status
 
 - [x] Prompt blocks, skills, config, DB schema ported
 - [x] Core loop: streaming, tools, handoffs, compaction, subagents, background shell
-- [ ] Memory retrieval: Qdrant + MiniLM + Jina reranker (`superapp/memory/retrieval.py`)
+- [x] Memory retrieval: Qdrant + MiniLM + Jina reranker (`superapp/memory/retrieval.py`)
+- [x] Daemon with WebSocket streaming; Expo app in the Muse layout
+- [x] Gmail connector: encrypted vault, OAuth connect flow, `bin/hatch_gws_cli` driving the ported skill, sends gated by approval cards (`superapp/connectors/`, `superapp/approvals.py`)
 - [ ] Browser worker (Playwright, accessibility tree, credential grants)
-- [ ] Scheduler (cron tiers) and hooks
-- [ ] Approval gates (Sentinel-style auditor prompt is in `superapp/prompts/blocks/sentinel/`)
-- [ ] Per-user sandbox provisioning
-- [ ] Web client
+- [ ] Scheduler (cron tiers) and hooks, including the Gmail watch hook
+- [ ] Sentinel-style tool-call auditor (prompt is in `superapp/prompts/blocks/sentinel/`)
+- [ ] Deploy next to the existing API on the AWS box
+- [ ] Per-user sandbox provisioning, Google sign-in
+
+## Gmail setup
+
+Set on the daemon: `SUPERAPP_GOOGLE_CLIENT_ID`, `SUPERAPP_GOOGLE_CLIENT_SECRET`,
+`SUPERAPP_GOOGLE_REDIRECT_URI=<public daemon url>/v1/gmail/callback`, `SUPERAPP_PUBLIC_URL`,
+and a `SUPERAPP_VAULT_KEY` (Fernet). Add the redirect URI to the OAuth client in Google Cloud.
+Then Connectors → Gmail → Connect in the app, or ask the agent, which posts a connect link.
+`scripts/test_gmail_flow.py` and `scripts/fake_gmail.py` exercise the whole path without Google.

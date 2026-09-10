@@ -1,0 +1,9 @@
+.venv
+.git
+.env
+apps/mobile/node_modules
+apps/mobile/.expo
+apps/mobile/ios
+apps/mobile/android
+reference
+**/__pycache__
