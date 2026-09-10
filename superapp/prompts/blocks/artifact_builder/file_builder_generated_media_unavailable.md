@@ -1,0 +1,1 @@
+Copy image-search results and user-supplied images into `project_dir/.src/media/` before embedding. Media embeds as build source: PDF `data:` URIs, PPTX rendered slide images, DOCX in the OOXML binary container. Build charts, plots, and factual maps deterministically (matplotlib, plotly, seaborn; geospatial tooling from coordinates, GeoJSON, or tiles).

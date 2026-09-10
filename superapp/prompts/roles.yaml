@@ -1,0 +1,100 @@
+# Prompt assembly manifest. Each role is an ordered list of entries:
+#   - a block path under superapp/prompts/blocks (verbatim Muse text, placeholders filled)
+#   - "$name" for a section computed at assembly time (see assembler.py: SECTIONS)
+# Blocks reconstructed from Muse are not edited; ordering here follows the
+# documented context assembly: identity -> environment -> standing files ->
+# memory -> tools -> work mechanics -> safety/security -> time -> context -> style.
+
+chat:
+  - chat/who_you_are.md
+  - shared/who_built_you.md
+  - shared/trust.md
+  - chat/who_you_work_for.md
+  - chat/personalization.md
+  - chat/how_you_work.md
+  - chat/initiative.md
+  - chat/how_you_evolve.md
+  - chat/your_environment.md
+  - chat/filesystem.md
+  - chat/workspace_files.md
+  - $standing_files
+  - chat/memory_recall.md
+  - chat/relationships.md
+  - chat/secure_storage.md
+  - shared/tools_intro.md
+  - shared/tools_runtime_pointer.md
+  - chat/tool_rules.md
+  - chat/grounding.md
+  - chat/identifier_validation.md
+  - $skills
+  - $runtime
+  - shared/scheduled_work_mechanics.md
+  - chat/scheduled_work_results.md
+  - chat/keeping_track_of_active_work.md
+  - chat/purchasing_flow.md
+  - chat/payments_wallet.md
+  - shared/discretion.md
+  - chat/discretion_alignment.md
+  - shared/security_authority.md
+  - chat/security_authority.md
+  - chat/security_sensitive_actions.md
+  - chat/security_social_engineering.md
+  - shared/security_content_markers.md
+  - shared/security_secrets.md
+  - chat/safety_oversight.md
+  - chat/safety_credentials.md
+  - shared/safety_sensitive_attributes.md
+  - shared/safety_self_modification.md
+  - chat/contextual_awareness.md
+  - chat/date_time_awareness_head.md
+  - chat/date_validation_opener.md
+  - chat/date_validation_rest.md
+  - shared/temporal_guidance_chat.md
+  - chat/user_location_awareness.md
+  - chat/managing_context_opener.md
+  - shared/managing_context_body.md
+  - chat/managing_context_retention.md
+  - chat/writing_style.md
+  - chat/response_formatting.md
+  # omitted until their tools exist: chat/commentary.md (reactions), chat/helpfulness_reminder.md (muse.create_options)
+
+subagent:
+  - agent/who_you_are.md
+  - shared/who_built_you.md
+  - agent/your_requester.md
+  - agent/your_environment_intro.md
+  - $environment_map
+  - agent/environment_runtime_worker.md
+  - agent/workspace_files.md
+  - agent/runtime_files_list.md
+  - $standing_files
+  - agent/memory.md
+  - agent/memory_recall_opening.md
+  - shared/memory_recall_doctrine.md
+  - agent/person_records.md
+  - shared/tools_intro.md
+  - shared/tools_runtime_pointer_untruncated.md
+  - agent/tool_rules.md
+  - agent/tool_rules_worker.md
+  - $skills
+  - $runtime
+  - agent/safety_credentials_worker.md
+  - agent/security_authority.md
+  - agent/security_sensitive_actions_worker.md
+  - agent/security_social_engineering_worker.md
+  - agent/security_standing_risk_worker.md
+  - agent/safety_oversight_detached.md
+  - shared/safety_core_detached.md
+  - agent/timezones_trust.md
+  - shared/temporal_guidance_detached.md
+  - agent/date_validation_opener.md
+  - agent/identifier_validation.md
+  - agent/managing_context_opener_worker.md
+  - shared/managing_context_body.md
+  - agent/managing_context_retention_worker.md
+  - agent/reporting_back.md
+
+compaction:
+  - memory_flush/who_you_are.md
+  - memory_flush/safety.md
+  - memory_flush/security_authority.md

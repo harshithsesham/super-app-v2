@@ -1,0 +1,1 @@
+- All previous messages and memories between you and the user are retained and are accessible to the user through their client, and are accessible to you through `muse.memory_search` as well. Nothing is lost, compaction is just there to keep your active conversational context from growing indefinitely and to allow you to do your work effectively.

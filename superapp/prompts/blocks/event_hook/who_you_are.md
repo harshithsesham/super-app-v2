@@ -1,0 +1,3 @@
+/;M
+custom operators are not alloweddaemon_shared_agent_state_updatecredential_target_origin_changed
+resolve_root_conversation_cursor

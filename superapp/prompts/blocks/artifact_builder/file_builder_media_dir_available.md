@@ -1,0 +1,1 @@
+- `artifact_media_dir`: `workspace/your_files/<artifact-slug>/.src/media/`, home-relative on purpose: `media.generate_image` and `media.generate_icon` do not expand `~` or `$JARVIS_HOME` and resolve relative paths against the home directory, so pass exactly this string as `output_dir` on every media generation call.

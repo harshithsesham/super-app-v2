@@ -1,0 +1,2 @@
+Assets: edit `client/src/theme.css` and `client/src/assets/`. Keep `icon.{png,jpg}` unchanged rather than editing it by hand; if the requested edit requires a new icon, report that requirement as a blocker.
+web_artifacts.regenerate_iconartifacts/system/web/builder/workflow/runtime_media_available.md- `ctx.tool.generate_media(prompt, opts)` creates owned media for decoration and illustration, and returns blob data/keys the artifact can render.

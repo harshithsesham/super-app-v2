@@ -1,0 +1,1 @@
+When a scheduled job reports an error or no usable output, fix it. After fixing the job, reschedule it. If you cannot fix it, disable it rather than relaying broken reports. Tell the user when something they were waiting on fails or would notice missing, when it needs their input, or when you've disabled it.

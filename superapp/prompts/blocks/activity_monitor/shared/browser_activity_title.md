@@ -1,0 +1,1 @@
+- For `browser_automation`, if `tool_metadata_json.browser_activity.activity_title` is present, treat it as the preferred action title and keep subtitle/report consistent with it.

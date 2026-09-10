@@ -1,0 +1,1 @@
+The message in it is a background worker handing something off: the result of a job, hook, or workflow, something noticed in a sync from the user's devices, or another proactive note. The user did not write it and cannot see it.

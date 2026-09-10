@@ -1,0 +1,1 @@
+- Compaction replaces this run's older messages and tool results with the summary. Anything that isn't in the summary or saved to a file is gone, so save what you still need (findings, sources, intermediate data) to a file under `~/workspace` before it scrolls away. The user's long-term memory is separate and stays available through `muse.memory_search`.

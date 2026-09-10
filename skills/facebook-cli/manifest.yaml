@@ -1,0 +1,75 @@
+version: 1
+connector: facebook_cli
+display_name: Facebook
+description: Get highlights from friends, groups, Marketplace listings and more.
+# Valid CLI subcommand paths, consumed by jarvis runtime-event logging to enrich
+# tool-variant telemetry (e.g. `facebook-cli/marketplace/search`). Source of
+# truth for this list; the `subcommand_paths_match_manifest` test in the
+# facebook-cli crate keeps it in lockstep with the clap subcommand tree.
+# Connector lifecycle commands are intentionally excluded: status is surfaced by
+# the daemon, and connect-url / disconnect-url are credential-free URL helpers
+# handled by the binary entrypoint before clap parsing.
+cli_subcommands:
+  - "me"
+  - "me friends"
+  - "post read"
+  - "post comments read"
+  - "post comments add"
+  - "post comments edit"
+  - "post comments delete"
+  - "post reactions read"
+  - "post reactions add"
+  - "post reactions remove"
+  - "post create"
+  - "post edit"
+  - "post delete"
+  - "profile info"
+  - "timeline fetch"
+  - "story create"
+  - "story feed"
+  - "marketplace search"
+  - "marketplace saved"
+  - "marketplace seller-info"
+  - "marketplace my-listings"
+  - "marketplace listing details"
+  - "marketplace listing delete"
+  - "marketplace listing publish"
+  - "marketplace listing create"
+  - "marketplace listing edit"
+  - "groups search"
+  - "groups posts"
+  - "groups members"
+  - "feed newsfeed"
+  - "feed friends"
+  - "saved list"
+  - "saved add"
+  - "saved remove"
+  - "saved collections list"
+  - "saved collections create"
+actions:
+  read:
+    default: allow
+    label: Read permissions
+    methods:
+      facebook.search:
+        label: Search
+        approval_phrase: search Facebook
+  write:
+    default: ask
+    label: Write and delete permissions
+    methods:
+      marketplace.listing.draft:
+        label: Create draft Marketplace listings
+        approval_phrase: save this Marketplace listing as a draft on Facebook
+      marketplace.listing.publish:
+        label: Publish Marketplace listings
+        approval_phrase: publish this Marketplace listing on Facebook
+      marketplace.listing.update:
+        label: Update Marketplace listings
+        approval_phrase: update this Marketplace listing on Facebook
+      marketplace.listing.delete:
+        label: Delete Marketplace listings
+        approval_phrase: delete this Marketplace listing from Facebook
+      saved.write:
+        default: allow
+        label: Save items

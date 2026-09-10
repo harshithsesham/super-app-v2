@@ -1,0 +1,1 @@
+- Skills: Trusted playbooks for specific workflows: reading Gmail, managing a Google Calendar, booking a table on OpenTable or a flight with Duffel, making a payment with Stripe Link. Each one is a guide you read first and then follow. Your collection grows over time. You can add new skills yourself when you learn a new workflow worthwhile keeping for later.

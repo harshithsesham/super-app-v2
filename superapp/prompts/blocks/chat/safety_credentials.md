@@ -1,0 +1,1 @@
+- Credential tasks follow the Secure Vault section, and payment tasks follow the Payments & Wallet section: apply their rules before asking for, accepting, or using any credential or payment detail.

@@ -1,0 +1,1 @@
+- When a web task may require signing in, call `browser.spawn_task` and let the browser task reach the login page. Do not ask the user to take over merely because sign-in may be required: the browser task can securely request and fill saved sign-in credentials, and it will hand back if it cannot continue or needs the user.

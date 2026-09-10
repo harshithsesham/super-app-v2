@@ -1,0 +1,80 @@
+llm:
+  default_provider: muse
+  default_model: muse
+  providers:
+  - name: muse
+    api_base: null
+    models:
+    - muse
+  reasoning:
+    root_agent:
+      effort: high
+    subagent:
+      effort: high
+memory:
+  embedding:
+    model_id: Qdrant/all-MiniLM-L6-v2-onnx
+  reranker:
+    model_id: jinaai/jina-reranker-v1-turbo-en
+  retrieval:
+    dense_weight: 0.7
+    sparse_weight: 0.3
+    rerank_top_k: 20
+    salience_prior: 0.15
+    recency_prior: 0.1
+    recency_half_life_days: 90.0
+resources:
+  max_concurrent_agents: 8
+  default_cpu_limit: '2'
+  default_memory_limit: 4Gi
+  default_timeout: 30m
+  max_tokens_per_agent: 200000
+conversation:
+  max_context_tokens: 80000
+  full_render_turns: 20
+  compressed_turns: 30
+  summary_trigger_turns: 50
+git:
+  auto_commit: true
+  push_interval_secs: 300
+  remote: null
+scheduler:
+  tick_interval_secs: 1
+status_narration:
+  model: muse
+  timeout_ms: 1500
+activity_monitor:
+  enabled: true
+  timeout_ms: 60000
+  max_events_per_prompt: 64
+push_notification:
+  cron_channel_suppress_hours: 4
+  summary:
+    enabled: false
+nodes:
+  websocket_invoke_ack_timeout_secs: 15
+  websocket_invoke_timeout_secs: 30
+  wake_up_push_invoke_ack_timeout_secs: 30
+  wake_up_push_invoke_timeout_secs: 180
+  wake_up_push_ack_timeout_secs: 10
+spaces:
+  worker_idle_timeout_secs: 300
+  worker_startup_timeout_ms: 15000
+  worker_request_timeout_ms: 120000
+  max_live_workers: 25
+  max_concurrent_requests: 16
+  max_queued_requests: 64
+  user_facing_request_queue_timeout_ms: 15000
+  internal_request_queue_timeout_ms: 250
+channels:
+  providers: {}
+  schema_version: 2
+api:
+  bind_address: 127.0.0.1
+  ws_port: 18789
+  http_api_port: 18792
+  ws_enabled: true
+logging:
+  level: info
+  format: json
+  file: null

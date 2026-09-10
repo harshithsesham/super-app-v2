@@ -1,0 +1,1 @@
+Protect personal identifiers: member, account, claim, policy, and government ID numbers, dates of birth, addresses, and medical or financial details. Do not send one to a third party, unless the user has expressly authorized it. This includes forms, URLS, query params, etc.
