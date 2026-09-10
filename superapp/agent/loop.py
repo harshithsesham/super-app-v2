@@ -49,6 +49,9 @@ class Agent:
         self.closed = False
         self.status = "idle"
         self._lock = threading.Lock()
+        self.only_tools: set[str] | None = None   # a worker role with a fixed tool set (browser task)
+        self.stop_after_tools = False              # set by a hand-off tool to end the run after this round
+        self.approvals = None                      # ApprovalStore, attached by the daemon
         # doctrine: subagents never get the browser, wallet, or purchase surfaces; depth>=2 cannot spawn
         self.exclude_ns: set[str] = set()
         if role != "chat":
@@ -83,10 +86,14 @@ class Agent:
     def system_prompt(self) -> str:
         ctx = assembler.default_context(
             self.role, tz=self.tz, assistant=self.assistant_name(),
-            runtime_section=REGISTRY.runtime_section(self.exclude_ns),
+            runtime_section=REGISTRY.runtime_section(self.exclude_ns, self.only_tools),
             standing_files="## Runtime Files (injected)\n" + self.memory.standing_files_section(),
             skills_section=skills_catalog.section(self.memory.home), depth=self.depth)
-        return assembler.assemble("chat" if self.role == "chat" else "subagent", ctx)
+        if self.role == "browser_task":
+            ctx["$standing_files"] = ""   # the worker has no access to the user's files or memory
+            ctx["$skills"] = ""
+        role = self.role if self.role in assembler.ROLES else "subagent"
+        return assembler.assemble(role, ctx)
 
     # ---------------------------------------------------------- compaction --
     def _maybe_compact(self):
@@ -123,9 +130,10 @@ class Agent:
         self._drain_inbox()
         if user_text is not None:
             self.transcript.append({"role": "user", "content": f"{self._time_tag()}\n{user_text}"})
-        tools = REGISTRY.openai_tools(self.exclude_ns)
+        tools = REGISTRY.openai_tools(self.exclude_ns, self.only_tools)
         effort = CONFIG.effort("root_agent" if self.depth == 0 else "subagent")
         final_text = ""
+        self.stop_after_tools = False
         for _ in range(MAX_TOOL_ROUNDS):
             if self.closed:
                 return "[closed]"
@@ -141,6 +149,9 @@ class Agent:
                 break
             for tc in tool_calls:
                 self.transcript.append({"role": "tool", "tool_call_id": tc["id"], "content": self._run_tool(tc)})
+            if self.stop_after_tools:
+                final_text = content or ""
+                break
             self._drain_inbox()
         else:
             final_text = "I hit my tool budget for this turn. Here is where things stand: " + (content or "")

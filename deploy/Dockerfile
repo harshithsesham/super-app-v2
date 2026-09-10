@@ -14,9 +14,13 @@ COPY bin ./bin
 COPY db ./db
 COPY scripts ./scripts
 
+# Browsers live outside /root/.cache, which the compose file mounts as a volume.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+
 # The CLI shim expects the repo's own venv at .venv/bin/python.
 RUN python -m venv .venv && ./.venv/bin/pip install --no-cache-dir -e ".[memory,server]" \
-    && ./.venv/bin/pip install --no-cache-dir httpx cryptography websockets \
+    && ./.venv/bin/pip install --no-cache-dir httpx cryptography websockets playwright \
+    && ./.venv/bin/playwright install --with-deps chromium \
     && chmod +x bin/hatch_gws_cli
 
 ENV SUPERAPP_HOME_ROOT=/data/users \

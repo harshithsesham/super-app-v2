@@ -13,6 +13,14 @@ export type Idea = { id: string; icon: string; title: string; body: string };
 export type Goal = { id: string; title: string; category: string; done: boolean; plan?: string[] };
 export type Approval = { id: string; kind: string; title: string; subtitle: string; details: { label: string; value: string }[]; decision: string | null };
 export type Connector = { provider: string; status: "connected" | "available"; configured: boolean; email: string | null };
+export type BrowserTask = { task_id: string; title: string; status: string; status_title: string; url: string; screenshot?: string };
+export type Hub = {
+  greeting: string; stamp: string;
+  brief: { ready: boolean; title: string; sub: string; text: string; kicker?: string };
+  inbox: { connected: boolean; email?: string | null; headline: string; body: string; stats: { n: number; label: string }[] };
+  goals: { open: number; done: number };
+  grid: { name: string; skill: string; tone: string; ask: string; status: string; sub: string }[];
+};
 
 export type Frame =
   | { type: "history"; messages: ChatMessage[]; assistant: string; status: string }
@@ -22,6 +30,7 @@ export type Frame =
   | { type: "turn_end"; text: string }
   | { type: "approval"; approval: Approval }
   | { type: "approval_resolved"; id: string; decision: string }
+  | { type: "browser"; task: BrowserTask }
   | { type: "error"; message: string };
 
 const KEY = "session";
@@ -68,6 +77,10 @@ export class Api {
     return this.req<{ id: string; decision: string }>(`/v1/approvals/${id}`, { method: "POST", body: JSON.stringify({ decision }) });
   }
   connectors() { return this.req<{ connectors: Connector[] }>("/v1/connectors"); }
+  browserTasks() { return this.req<{ tasks: BrowserTask[]; cards: BrowserTask[] }>("/v1/browser/tasks"); }
+  hub() { return this.req<Hub>("/v1/hub"); }
+  voiceStatus() { return this.req<{ tts: boolean; voice_id: string }>("/v1/voice/status"); }
+  stopBrowserTask(id: string) { return this.req<{ task_id: string }>(`/v1/browser/tasks/${id}/stop`, { method: "POST" }); }
   gmailAuthUrl() { return this.req<{ auth_url: string }>("/v1/gmail/auth-url"); }
   gmailDisconnect() { return this.req<{ removed: boolean }>("/v1/gmail/disconnect", { method: "POST" }); }
   fileUrl(path: string) { return `${this.session.url}/v1/files/${encodeURI(path)}`; }

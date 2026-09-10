@@ -4,22 +4,34 @@
     "slug": "super-app",
     "version": "0.2.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
-    "backgroundColor": "#F4F5F7",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#08070E",
     "newArchEnabled": true,
     "scheme": "superapp",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.harshith.superapp",
       "appleTeamId": "JAUSPN67UY",
-      "buildNumber": "55",
-      "infoPlist": { "ITSAppUsesNonExemptEncryption": false }
+      "buildNumber": "56",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["audio"]
+      }
     },
     "android": {
       "package": "com.harshith.superapp"
     },
     "extra": {
       "apiUrl": "https://app.nutrishiksha.com/muse"
-    }
+    },
+    "plugins": [
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Your agent listens while you talk to it.",
+          "speechRecognitionPermission": "Your spoken words are transcribed on this device."
+        }
+      ]
+    ]
   }
 }

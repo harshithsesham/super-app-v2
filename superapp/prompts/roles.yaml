@@ -94,6 +94,26 @@ subagent:
   - agent/managing_context_retention_worker.md
   - agent/reporting_back.md
 
+browser_task:
+  - browser_task/who_you_are.md
+  - shared/who_built_you.md
+  - browser_task/your_environment.md
+  - browser_task/assignment.md
+  - browser_task/tools.md
+  - $runtime
+  - browser_task/when_stuck.md
+  - browser_task/bot_challenges.md
+  - browser_task/bot_challenge_handoff.md
+  - browser_task/payment.md
+  - browser_task/security_task_alignment.md
+  - browser_task/security_authority.md
+  - browser_task/security_credentials.md
+  - browser_task/security_identifiers.md
+  - browser_task/security_precall_checklist.md
+  - browser_task/safety.md
+  - browser_task/contextual_awareness.md
+  - browser_task/reporting_back.md
+
 compaction:
   - memory_flush/who_you_are.md
   - memory_flush/safety.md

@@ -4,14 +4,14 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { C } from "../theme";
 
-const stroke = (active: boolean) => (active ? C.text : "#3F434B");
+const stroke = (active: boolean) => (active ? C.accent : C.muted);
 
 export function ChatIcon({ active }: { active?: boolean }) {
   const c = stroke(!!active);
   return (
     <View style={[i.box]}>
       <View style={{ width: 22, height: 18, borderRadius: 11, borderWidth: 2, borderColor: c }} />
-      <View style={{ position: "absolute", left: 4, bottom: -1, width: 7, height: 7, backgroundColor: C.surface, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: c, transform: [{ rotate: "-20deg" }] }} />
+      <View style={{ position: "absolute", left: 4, bottom: -1, width: 7, height: 7, backgroundColor: C.panel, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: c, transform: [{ rotate: "-20deg" }] }} />
     </View>
   );
 }
@@ -50,6 +50,14 @@ export function LibraryIcon({ active }: { active?: boolean }) {
       <View style={{ width: 0, height: 0, borderLeftWidth: 5, borderRightWidth: 5, borderBottomWidth: 9, borderLeftColor: "transparent", borderRightColor: "transparent", borderBottomColor: c }} />
       <View style={{ width: 9, height: 9, borderRadius: 2, borderWidth: 2, borderColor: c }} />
       <View style={{ width: 9, height: 9, borderRadius: 2, borderWidth: 2, borderColor: c, transform: [{ rotate: "45deg" }], marginLeft: 1 }} />
+    </View>
+  );
+}
+export function HubIcon({ active }: { active?: boolean }) {
+  const c = stroke(!!active);
+  return (
+    <View style={[i.box, { width: 22, height: 22, flexDirection: "row", flexWrap: "wrap", gap: 4 }]}>
+      {[0, 1, 2, 3].map((k) => <View key={k} style={{ width: 9, height: 9, borderRadius: 3, borderWidth: 2, borderColor: c }} />)}
     </View>
   );
 }

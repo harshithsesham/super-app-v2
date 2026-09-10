@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio, hashlib, hmac, json, os, pathlib, secrets, threading, time, urllib.parse
 from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .config import CONFIG
@@ -27,9 +27,10 @@ from .memory.files import HomeMemory
 from .prompts import skills_catalog
 from .tools import local, memory_tools  # noqa: F401  registers handlers
 from .agent import subagents  # noqa: F401
+from .browser import worker as browser_worker, web as browser_web  # noqa: F401
 from .agent.loop import Agent
 from .agent import subagents as subagent_mod
-from . import auth
+from . import auth, hub, voice
 from .approvals import Approval, ApprovalStore
 from .connectors import vault
 from .connectors.gmail import GmailClient, configured as gmail_configured
@@ -117,6 +118,8 @@ class Room:
         self.approvals = ApprovalStore(
             on_new=lambda a: self._send({"type": "approval", "approval": a.public()}),
             on_resolved=lambda a: self._send({"type": "approval_resolved", "id": a.id, "decision": a.decision}))
+        self.agent.approvals = self.approvals
+        self.browser_tasks: dict[str, dict] = {}
 
     # transcript persistence
     @property
@@ -150,6 +153,11 @@ class Room:
         self._send({"type": "text_delta", "text": s})
 
     def _on_event(self, kind: str, data: dict):
+        if kind == "browser_step":
+            # keep the latest card per task for late-joining clients; screenshots stay out of the event log
+            self.browser_tasks[data["task_id"]] = dict(data, ts=time.time())
+            self._send({"type": "browser", "task": data})
+            data = {k: v for k, v in data.items() if k != "screenshot"}
         rec = {"ts": time.time(), "kind": kind, "data": data}
         self.events.append(rec)
         del self.events[:-500]
@@ -223,6 +231,42 @@ def internal_approval(body: dict, x_internal_token: str = Header("")):
 @app.get("/v1/approvals")
 def list_approvals(user: str = Depends(current_user)):
     return {"approvals": room_for(user).approvals.pending()}
+
+
+@app.get("/v1/hub")
+def hub_page(user: str = Depends(current_user)):
+    r = room_for(user)
+    return hub.build(r.home, r.agent.tz, auth.user_record(user).get("name", "") or r.memory.read("USER.md").split("call_them:")[-1].split("\n")[0].strip())
+
+
+@app.get("/v1/voice/speak")
+def voice_speak(text: str, user: str = Depends(current_user)):
+    r = room_for(user)
+    audio = voice.tts(text, r.home / ".tts-cache")
+    if not audio:
+        return Response(status_code=204)
+    return Response(content=audio, media_type="audio/mpeg")
+
+
+@app.get("/v1/voice/status")
+def voice_status(user: str = Depends(current_user)):
+    return {"tts": voice.configured(), "voice_id": voice.voice_id()}
+
+
+@app.get("/v1/browser/tasks")
+def browser_tasks(user: str = Depends(current_user)):
+    r = room_for(user)
+    return {"tasks": [t.public() for t in browser_worker.TASKS.values() if t.parent.id == r.agent.id],
+            "cards": list(r.browser_tasks.values())[-3:]}
+
+
+@app.post("/v1/browser/tasks/{task_id}/stop")
+def browser_stop(task_id: str, user: str = Depends(current_user)):
+    t = browser_worker.TASKS.get(task_id)
+    if not t or t.parent.id != room_for(user).agent.id:
+        raise HTTPException(404, "no such task")
+    t.stop()
+    return {"task_id": task_id, "status": "stopped"}
 
 
 @app.post("/v1/approvals/{approval_id}")

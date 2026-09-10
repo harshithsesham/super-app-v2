@@ -99,7 +99,7 @@ const s = StyleSheet.create({
   error: { color: C.red, fontSize: 14, textAlign: "center" },
   input: { backgroundColor: C.surface, borderRadius: 14, padding: 14, fontSize: 16, color: C.text },
   btn: { backgroundColor: C.accent, borderRadius: R.pill, paddingVertical: 16, alignItems: "center", marginTop: 6 },
-  btnText: { fontSize: 17, fontWeight: "600", color: "#fff" },
+  btnText: { fontSize: 17, fontWeight: "600", color: C.onAccent },
   btnSecondary: { backgroundColor: C.card, borderRadius: R.pill, paddingVertical: 14, alignItems: "center" },
   btnSecondaryText: { fontSize: 16, fontWeight: "600", color: C.text },
   advanced: { fontSize: 13, color: C.muted, textAlign: "center", marginTop: 4 },

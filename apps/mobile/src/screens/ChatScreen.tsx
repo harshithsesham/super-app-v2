@@ -13,6 +13,7 @@ export type LiveTurn = { text: string; steps: string[] } | null;
 
 type Row =
   | { key: string; kind: "msg"; msg: ChatMessage }
+  | { key: string; kind: "card" }
   | { key: string; kind: "live"; live: NonNullable<LiveTurn> };
 
 // One user-facing line per runtime event, in the voice of the app rather
@@ -81,6 +82,7 @@ export function ChatScreen({
   onSend,
   onStop,
   footer,
+  card,
 }: {
   assistant: string;
   messages: ChatMessage[];
@@ -89,15 +91,17 @@ export function ChatScreen({
   onSend: (text: string) => void;
   onStop: () => void;
   footer?: React.ReactNode;
+  card?: React.ReactNode;   // an inline card that follows the thread (browser task)
 }) {
   const [draft, setDraft] = useState("");
   const list = useRef<FlatList<Row>>(null);
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = messages.map((m, i) => ({ key: `m${i}`, kind: "msg", msg: m }));
+    if (card) out.push({ key: "card", kind: "card" });
     if (live) out.push({ key: "live", kind: "live", live });
     return out;
-  }, [messages, live]);
+  }, [messages, live, card]);
 
   useEffect(() => {
     const t = setTimeout(() => list.current?.scrollToEnd({ animated: true }), 60);
@@ -112,6 +116,9 @@ export function ChatScreen({
   }, [draft, onSend]);
 
   const render = ({ item }: { item: Row }) => {
+    if (item.kind === "card") {
+      return <View style={s.agentCol}>{card}</View>;
+    }
     if (item.kind === "live") {
       return (
         <View style={s.agentCol}>
@@ -232,5 +239,5 @@ const s = StyleSheet.create({
   plus: { fontSize: 26, color: C.text, lineHeight: 28 },
   input: { flex: 1, fontSize: 17, color: C.text, paddingVertical: 12, maxHeight: 140 },
   sendBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: C.accent, alignItems: "center", justifyContent: "center" },
-  sendText: { color: "#fff", fontSize: 17, fontWeight: "700" },
+  sendText: { color: C.onAccent, fontSize: 17, fontWeight: "700" },
 });

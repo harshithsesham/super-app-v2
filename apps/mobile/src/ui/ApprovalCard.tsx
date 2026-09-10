@@ -55,5 +55,5 @@ const s = StyleSheet.create({
   deny: { flex: 1, backgroundColor: C.card, borderRadius: R.pill, paddingVertical: 14, alignItems: "center" },
   denyText: { fontSize: 17, fontWeight: "600", color: C.text },
   allow: { flex: 1, backgroundColor: C.accent, borderRadius: R.pill, paddingVertical: 14, alignItems: "center" },
-  allowText: { fontSize: 17, fontWeight: "600", color: "#fff" },
+  allowText: { fontSize: 17, fontWeight: "600", color: C.onAccent },
 });

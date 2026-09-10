@@ -61,11 +61,14 @@ class Registry:
     def load_namespace(self, ns: str):
         self.deferred.discard(ns)
 
-    def openai_tools(self, exclude_ns: set[str] | None = None) -> list[dict]:
+    def openai_tools(self, exclude_ns: set[str] | None = None, only_tools: set[str] | None = None) -> list[dict]:
         out = []
         for name, fn in self.schemas.items():
             ns = name.split(".", 1)[0]
-            if ns in self.deferred or (exclude_ns and ns in exclude_ns):
+            if only_tools is not None:
+                if name not in only_tools:
+                    continue
+            elif ns in self.deferred or (exclude_ns and ns in exclude_ns):
                 continue
             params = fn.get("parameters") or {"type": "object", "properties": {}}
             out.append({"type": "function", "function": {
@@ -74,8 +77,13 @@ class Registry:
                 "parameters": params}})
         return out
 
-    def runtime_section(self, exclude_ns: set[str] | None = None) -> str:
+    def runtime_section(self, exclude_ns: set[str] | None = None, only_tools: set[str] | None = None) -> str:
         lines = ["## Runtime", "Tools available to you, by namespace. Call them by their dotted name."]
+        if only_tools is not None:
+            for name in sorted(only_tools):
+                if name in self.schemas:
+                    lines.append(f"- `{name}`: {(self.schemas[name].get('description') or '')[:300]}")
+            return "\n".join(lines)
         for ns, meta in self.namespaces.items():
             if exclude_ns and ns in exclude_ns:
                 continue

@@ -23,7 +23,7 @@ Model: Muse Spark 1.3 via the Meta Model API.
 | `reference/runtime-cell/` | container boot and supervision scripts from the original runtime |
 
 | `superapp/server.py` | the daemon: bearer auth, one warm agent per user, REST + WebSocket streaming, feed/ideas/goals |
-| `apps/mobile/` | Expo app in the Muse layout: chat thread, avatar with live status, Feed, Ideas, Goals, Library, Connectors, Memory, activity log |
+| `apps/mobile/` | Expo app: Muse structure in the space theme. Hub, chat thread with avatar status, Ideas, Goals, Library, Connectors, Memory, activity log, voice orb |
 
 ## Run
 
@@ -50,7 +50,9 @@ Without those env vars the app shows a sign-in screen asking for the server URL 
 - [x] Memory retrieval: Qdrant + MiniLM + Jina reranker (`superapp/memory/retrieval.py`)
 - [x] Daemon with WebSocket streaming; Expo app in the Muse layout
 - [x] Gmail connector: encrypted vault, OAuth connect flow, `bin/hatch_gws_cli` driving the ported skill, sends gated by approval cards (`superapp/connectors/`, `superapp/approvals.py`)
-- [ ] Browser worker (Playwright, accessibility tree, credential grants)
+- [x] Browser worker: Playwright driver with referenced-element snapshots, `browser_task` role, live Browser card, approval on checkout-like steps (`superapp/browser/`)
+- [x] Hub page and voice orb from the earlier app, fed by this runtime (`superapp/hub.py`, `superapp/voice.py`, `apps/mobile/src/screens/HubScreen.tsx`, `apps/mobile/src/ui/Orb.tsx`)
+- [ ] Browser credential grants and takeover
 - [ ] Scheduler (cron tiers) and hooks, including the Gmail watch hook
 - [ ] Sentinel-style tool-call auditor (prompt is in `superapp/prompts/blocks/sentinel/`)
 - [ ] Deploy next to the existing API on the AWS box

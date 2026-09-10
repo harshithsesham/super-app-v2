@@ -1,23 +1,30 @@
-// App shell, laid out like Muse: hamburger at top left, the avatar centered
-// with a name pill that shows what it's doing, the active tab below, and a
-// floating five-icon bar: Chat, Feed, Ideas, Goals, Library.
+// App shell: the space theme over Muse's structure. Hub first, then the
+// long conversation, Ideas, Goals, Library. The avatar with its status
+// pill sits at the top of every tab, and the orb hangs at the edge for voice.
 import Constants from "expo-constants";
 import { StatusBar } from "expo-status-bar";
+import { useFonts } from "expo-font";
+import { InstrumentSans_400Regular, InstrumentSans_600SemiBold } from "@expo-google-fonts/instrument-sans";
+import { InstrumentSerif_400Regular } from "@expo-google-fonts/instrument-serif";
+import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Pressable } from "./src/ui/Tap";
 import { Avatar } from "./src/ui/Avatar";
-import { ChatIcon, FeedIcon, GoalsIcon, IdeasIcon, LibraryIcon, MenuIcon } from "./src/ui/Icons";
-import { C, R } from "./src/theme";
+import { Stars } from "./src/ui/Stars";
+import { Orb } from "./src/ui/Orb";
+import { ChatIcon, GoalsIcon, HubIcon, IdeasIcon, LibraryIcon, MenuIcon } from "./src/ui/Icons";
+import { C, F } from "./src/theme";
 import {
   AgentSocket, Api, clearSession, loadSession,
-  type ActivityEvent, type Approval, type ChatMessage, type Frame, type Session,
+  type ActivityEvent, type Approval, type BrowserTask, type ChatMessage, type Frame, type Session,
 } from "./src/api";
 import { ApprovalCard } from "./src/ui/ApprovalCard";
+import { BrowserCard } from "./src/ui/BrowserCard";
 import { SignInScreen } from "./src/screens/SignInScreen";
+import { HubScreen } from "./src/screens/HubScreen";
 import { ChatScreen, describe, statusTitle, type LiveTurn } from "./src/screens/ChatScreen";
-import { FeedScreen } from "./src/screens/FeedScreen";
 import { IdeasScreen } from "./src/screens/IdeasScreen";
 import { GoalsScreen } from "./src/screens/GoalsScreen";
 import { LibraryScreen } from "./src/screens/LibraryScreen";
@@ -27,7 +34,7 @@ import { ActivitySheet } from "./src/screens/ActivitySheet";
 import { MenuSheet } from "./src/screens/MenuSheet";
 
 const extra = (Constants.expoConfig?.extra ?? {}) as { apiUrl?: string; apiToken?: string };
-type Tab = "chat" | "feed" | "ideas" | "goals" | "library";
+type Tab = "hub" | "chat" | "ideas" | "goals" | "library";
 type Page = "connectors" | "memory" | null;
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
@@ -40,7 +47,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
           <Text style={{ color: C.red, fontSize: 16, marginBottom: 12 }}>Something broke on this screen.</Text>
           <Text style={{ color: C.muted, fontSize: 12, marginBottom: 24 }}>{String(this.state.error?.message ?? this.state.error)}</Text>
           <Pressable style={{ backgroundColor: C.accent, borderRadius: 12, padding: 14, alignItems: "center" }} onPress={() => this.setState({ error: null })}>
-            <Text style={{ color: "#fff", fontWeight: "600" }}>Try again</Text>
+            <Text style={{ color: C.onAccent, fontWeight: "600" }}>Try again</Text>
           </Pressable>
         </View>
       );
@@ -60,9 +67,10 @@ export default function AppRoot() {
 }
 
 function App() {
+  const [fontsLoaded] = useFonts({ InstrumentSerif_400Regular, InstrumentSans_400Regular, InstrumentSans_600SemiBold, JetBrainsMono_400Regular });
   const [auth, setAuth] = useState<"loading" | "signin" | "ready">("loading");
   const [session, setSession] = useState<Session | null>(null);
-  const [tab, setTab] = useState<Tab>("chat");
+  const [tab, setTab] = useState<Tab>("hub");
   const [page, setPage] = useState<Page>(null);
   const [menu, setMenu] = useState(false);
   const [activity, setActivity] = useState(false);
@@ -75,6 +83,10 @@ function App() {
   const [liveEvents, setLiveEvents] = useState<ActivityEvent[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [deciding, setDeciding] = useState<string | null>(null);
+  const [browser, setBrowser] = useState<BrowserTask | null>(null);
+  const [lastReply, setLastReply] = useState<{ seq: number; text: string } | null>(null);
+  const [speak, setSpeak] = useState<{ seq: number; text: string } | null>(null);
+  const [canSpeak, setCanSpeak] = useState(false);
   const socket = useRef<AgentSocket | null>(null);
 
   useEffect(() => {
@@ -110,7 +122,10 @@ function App() {
       }
       case "turn_end":
         setBusy(false); setLive(null);
-        if (f.text) setMessages((m) => [...m, { role: "assistant", text: f.text }]);
+        if (f.text) {
+          setMessages((m) => [...m, { role: "assistant", text: f.text }]);
+          setLastReply((r) => ({ seq: (r?.seq ?? 0) + 1, text: f.text }));
+        }
         break;
       case "approval":
         setApprovals((a) => [...a.filter((x) => x.id !== f.approval.id), f.approval]);
@@ -118,6 +133,9 @@ function App() {
         break;
       case "approval_resolved":
         setApprovals((a) => a.filter((x) => x.id !== f.id));
+        break;
+      case "browser":
+        setBrowser(f.task);
         break;
       case "error":
         setBusy(false); setLive(null);
@@ -136,10 +154,10 @@ function App() {
 
   const api = useMemo(() => (session ? new Api(session) : null), [session]);
 
-  // Pending cards survive a reconnect: ask the daemon for them whenever the socket opens.
   useEffect(() => {
     if (connection !== "open" || !api) return;
     api.approvals().then((r) => setApprovals(r.approvals)).catch(() => {});
+    api.voiceStatus().then((v) => setCanSpeak(v.tts)).catch(() => setCanSpeak(false));
   }, [connection, api]);
 
   const decide = useCallback(async (id: string, decision: "allow" | "deny") => {
@@ -150,10 +168,8 @@ function App() {
     setDeciding(null);
   }, [api]);
 
-  const sendToChat = useCallback((text: string) => {
-    setTab("chat");
-    socket.current?.send(text);
-  }, []);
+  const sendToChat = useCallback((text: string) => { setTab("chat"); socket.current?.send(text); }, []);
+  const sendFromOrb = useCallback((text: string) => { socket.current?.send(text); }, []);
 
   const signOut = useCallback(async () => {
     await clearSession();
@@ -162,47 +178,52 @@ function App() {
     setAuth("signin");
   }, []);
 
-  if (auth === "loading") {
+  if (!fontsLoaded || auth === "loading") {
     return <View style={{ flex: 1, backgroundColor: C.bg, justifyContent: "center", alignItems: "center" }}><ActivityIndicator color={C.accent} /></View>;
   }
   if (auth === "signin" || !session || !api) {
     return <SignInScreen defaultUrl={extra.apiUrl ?? ""} defaultToken={extra.apiToken} onSignedIn={(s) => { setSession(s); setAuth("ready"); }} />;
   }
 
-  if (page === "connectors") return <SafeAreaView style={s.root} edges={["top"]}><StatusBar style="dark" /><ConnectorsScreen api={api} onBack={() => setPage(null)} /></SafeAreaView>;
-  if (page === "memory") return <SafeAreaView style={s.root} edges={["top"]}><StatusBar style="dark" /><MemoryScreen api={api} onBack={() => setPage(null)} /></SafeAreaView>;
+  if (page === "connectors") return <SafeAreaView style={s.root} edges={["top"]}><Stars /><StatusBar style="light" /><ConnectorsScreen api={api} onBack={() => setPage(null)} /></SafeAreaView>;
+  if (page === "memory") return <SafeAreaView style={s.root} edges={["top"]}><Stars /><StatusBar style="light" /><MemoryScreen api={api} onBack={() => setPage(null)} /></SafeAreaView>;
 
   const status = busy ? statusTitle(live?.steps ?? []) : connection === "open" ? null : "Reconnecting…";
+  const showHeader = tab !== "hub";
 
   return (
     <SafeAreaView style={s.root} edges={["top", "left", "right"]}>
-      <StatusBar style="dark" />
-      <View style={s.header}>
-        {tab === "chat" ? (
-          <Pressable style={s.menuBtn} feel="control" onPress={() => setMenu(true)}><MenuIcon /></Pressable>
-        ) : <View style={{ width: 48 }} />}
-        <Pressable style={s.avatarWrap} onPress={() => setActivity(true)}>
-          <Avatar size={64} />
-          <View style={s.namePill}>
-            <Text style={s.name}>{assistant}</Text>
-            {status ? <Text style={s.status} numberOfLines={1}>{status}</Text> : null}
-          </View>
-        </Pressable>
-        <View style={{ width: 48 }} />
-      </View>
+      <Stars />
+      <StatusBar style="light" />
+      {showHeader ? (
+        <View style={s.header}>
+          {tab === "chat" ? (
+            <Pressable style={s.menuBtn} feel="control" onPress={() => setMenu(true)}><MenuIcon /></Pressable>
+          ) : <View style={{ width: 48 }} />}
+          <Pressable style={s.avatarWrap} onPress={() => setActivity(true)}>
+            <Avatar size={64} />
+            <View style={s.namePill}>
+              <Text style={s.name}>{assistant}</Text>
+              {status ? <Text style={s.status} numberOfLines={1}>{status}</Text> : null}
+            </View>
+          </Pressable>
+          <View style={{ width: 48 }} />
+        </View>
+      ) : null}
 
       <View style={s.body}>
-        {tab === "chat" ? (
-          <>
-            <ChatScreen assistant={assistant} messages={messages} live={live} busy={busy}
-              onSend={(t) => socket.current?.send(t)} onStop={() => socket.current?.stop()}
-              footer={approvals.length ? (
-                <ApprovalCard approval={approvals[0]} busy={deciding === approvals[0].id}
-                  onDecide={(d) => decide(approvals[0].id, d)} />
-              ) : null} />
-          </>
-        ) : tab === "feed" ? (
-          <FeedScreen api={api} onDiscuss={(p) => sendToChat(`Let's discuss this from my feed: "${p.title}"`)} />
+        {tab === "hub" ? (
+          <HubScreen api={api} assistant={assistant}
+            onAsk={sendToChat}
+            onPlay={(text) => setSpeak((p) => ({ seq: (p?.seq ?? 0) + 1, text }))}
+            onConnect={() => setPage("connectors")} />
+        ) : tab === "chat" ? (
+          <ChatScreen assistant={assistant} messages={messages} live={live} busy={busy}
+            onSend={(t) => socket.current?.send(t)} onStop={() => socket.current?.stop()}
+            card={browser ? <BrowserCard task={browser} onStop={() => { api.stopBrowserTask(browser.task_id).catch(() => {}); }} /> : null}
+            footer={approvals.length ? (
+              <ApprovalCard approval={approvals[0]} busy={deciding === approvals[0].id} onDecide={(d) => decide(approvals[0].id, d)} />
+            ) : null} />
         ) : tab === "ideas" ? (
           <IdeasScreen api={api} onStart={(i) => sendToChat(`Yes, go ahead: ${i.title}`)} />
         ) : tab === "goals" ? (
@@ -212,10 +233,12 @@ function App() {
         )}
       </View>
 
+      <Orb session={session} assistant={assistant} busy={busy} lastReply={lastReply} onSend={sendFromOrb} speak={speak} canSpeak={canSpeak} />
+
       <View style={s.tabWrap}>
         <View style={s.tabBar}>
           {([
-            ["chat", ChatIcon], ["feed", FeedIcon], ["ideas", IdeasIcon], ["goals", GoalsIcon], ["library", LibraryIcon],
+            ["hub", HubIcon], ["chat", ChatIcon], ["ideas", IdeasIcon], ["goals", GoalsIcon], ["library", LibraryIcon],
           ] as const).map(([t, Icon]) => (
             <Pressable key={t} style={[s.tabItem, tab === t && s.tabActive]} feel="control" onPress={() => setTab(t)}>
               <Icon active={tab === t} />
@@ -235,16 +258,16 @@ const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   header: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 4, height: 118 },
   menuBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: C.surface, alignItems: "center", justifyContent: "center", marginTop: 8,
-    shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
+    borderWidth: 1, borderColor: C.border },
   avatarWrap: { alignItems: "center" },
   namePill: { marginTop: -14, backgroundColor: C.surface, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 6, alignItems: "center",
-    shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, maxWidth: 240 },
-  name: { fontSize: 17, fontWeight: "700", color: C.text },
-  status: { fontSize: 14, color: C.muted, marginTop: 1 },
+    borderWidth: 1, borderColor: C.border, maxWidth: 240 },
+  name: { fontFamily: F.sansSemi, fontSize: 16, color: C.text },
+  status: { fontFamily: F.mono, fontSize: 10, letterSpacing: 1.5, color: C.muted, marginTop: 2 },
   body: { flex: 1 },
-  tabWrap: { alignItems: "center", paddingTop: 6, paddingBottom: 26, backgroundColor: C.bg },
-  tabBar: { flexDirection: "row", backgroundColor: C.surface, borderRadius: 36, padding: 6, gap: 4,
-    shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 16, shadowOffset: { width: 0, height: 6 } },
-  tabItem: { width: 58, height: 58, borderRadius: 29, alignItems: "center", justifyContent: "center" },
-  tabActive: { backgroundColor: C.card },
+  tabWrap: { alignItems: "center", paddingTop: 6, paddingBottom: 26, backgroundColor: "transparent" },
+  tabBar: { flexDirection: "row", backgroundColor: "rgba(20,16,31,0.96)", borderRadius: 36, padding: 6, gap: 2, borderWidth: 1, borderColor: C.border,
+    shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: { width: 0, height: 6 } },
+  tabItem: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center" },
+  tabActive: { backgroundColor: "rgba(199,184,255,0.14)" },
 });

@@ -81,5 +81,5 @@ const s = StyleSheet.create({
   time: { fontSize: 13, color: C.muted, marginLeft: 12 },
   empty: { fontSize: 16, color: C.muted, textAlign: "center", marginTop: 30 },
   close: { position: "absolute", bottom: 30, alignSelf: "center", backgroundColor: C.text, borderRadius: R.pill, paddingHorizontal: 28, paddingVertical: 14 },
-  closeText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  closeText: { color: C.onAccent, fontSize: 16, fontWeight: "600" },
 });

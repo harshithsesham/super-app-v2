@@ -73,7 +73,7 @@ const s = StyleSheet.create({
   rowBorder: { borderBottomWidth: 1, borderBottomColor: C.border },
   box: { width: 24, height: 24, borderRadius: 7, borderWidth: 2, borderColor: "#9AA0AB", alignItems: "center", justifyContent: "center" },
   boxDone: { backgroundColor: C.accent, borderColor: C.accent },
-  tick: { color: "#fff", fontSize: 14, fontWeight: "800" },
+  tick: { color: C.onAccent, fontSize: 14, fontWeight: "800" },
   title: { fontSize: 17, color: C.text },
   titleDone: { color: C.muted, textDecorationLine: "line-through" },
   plan: { fontSize: 14, color: C.muted },
