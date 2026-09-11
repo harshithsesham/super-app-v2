@@ -15,7 +15,11 @@ class FlyError(RuntimeError):
 
 class FlyMachines:
     def __init__(self, token: str | None = None, app: str | None = None, base: str | None = None):
-        self.token = token or os.environ.get("FLY_API_TOKEN", "")
+        self.token = (token or os.environ.get("FLY_API_TOKEN", "")).strip()
+        # `fly tokens create` prints "FlyV1 fm2_..."; the header takes the whole string after Bearer.
+        # If only the second half survived a paste, put the prefix back.
+        if self.token.startswith(("fm2_", "fm1r_", "fo1_")):
+            self.token = "FlyV1 " + self.token
         self.app = app or os.environ.get("FLY_CELLS_APP", "muse-cells")
         self.base = (base or os.environ.get("FLY_API_BASE", "https://api.machines.dev")).rstrip("/")
         self.http = httpx.Client(base_url=f"{self.base}/v1/apps/{self.app}", timeout=httpx.Timeout(90, connect=15),

@@ -47,6 +47,8 @@ class Cells:
         self.wake_lead = int(os.environ.get("SUPERAPP_CELL_WAKE_LEAD_SECS", "120"))
         self._lock = threading.Lock()
         self._user_locks: dict[str, threading.Lock] = {}
+        self._failed: dict[str, tuple[float, str]] = {}   # user -> (when, why); recent failures answer fast
+        self.retry_after = int(os.environ.get("SUPERAPP_CELL_RETRY_SECS", "30"))
         self.http = httpx.AsyncClient(timeout=httpx.Timeout(600, connect=15))
         threading.Thread(target=self._wake_loop, daemon=True, name="cell-wake").start()
 
@@ -97,6 +99,21 @@ class Cells:
             self._save()
             print(f"gateway: created cell for {user}: machine {m['id']} volume {vol['id']}", flush=True)
             return cell
+
+    def awake(self, user: str) -> dict:
+        """ensure_awake with a short memory of failures, so a broken token or a dead machine does not
+        turn every app request into a Fly API call."""
+        f = self._failed.get(user)
+        if f and time.time() - f[0] < self.retry_after:
+            raise FlyError(f[1])
+        try:
+            cell = self.ensure_awake(user)
+        except Exception as e:  # noqa: BLE001
+            self._failed[user] = (time.time(), f"{type(e).__name__}: {e}")
+            print(f"gateway: cell {user} unavailable: {type(e).__name__}: {e}", flush=True)
+            raise
+        self._failed.pop(user, None)
+        return cell
 
     def ensure_awake(self, user: str, timeout: int = 150) -> dict:
         """Start the user's machine if it is stopped and wait until its daemon answers /health."""
@@ -154,7 +171,7 @@ class Cells:
                         cell["last_state"] = st
                         if st != "started":
                             print(f"gateway: job due in {int(nxt - now)}s, waking cell {user}", flush=True)
-                            self.ensure_awake(user)
+                            self.awake(user)
                     elif cell.get("last_state") == "started" and now - cell.get("last_seen", 0) > 60:
                         r = httpx.get(self.addr(cell) + "/health", timeout=5)
                         st = (r.json().get("cell") or {}) if r.status_code == 200 else {}
@@ -184,9 +201,9 @@ class Cells:
         if not user:
             return await _json(send, 401, {"detail": "Invalid token"})
         try:
-            cell = await asyncio.to_thread(self.ensure_awake, user)
+            cell = await asyncio.to_thread(self.awake, user)
         except Exception as e:  # noqa: BLE001
-            return await _json(send, 503, {"detail": f"cell unavailable: {type(e).__name__}: {e}"})
+            return await _json(send, 503, {"detail": f"cell unavailable: {e}"})
         body = b""
         while True:
             msg = await receive()
@@ -219,12 +236,24 @@ class Cells:
             await ws.close(code=4401)
             return
         await ws.accept()
-        try:
-            cell = await asyncio.to_thread(self.ensure_awake, user)
-        except Exception as e:  # noqa: BLE001
-            await ws.send_text(json.dumps({"type": "error", "message": f"cell unavailable: {e}"}))
-            await ws.close(code=1011)
-            return
+        # Hold the socket while the cell comes up. Closing it on failure would make the app
+        # reconnect immediately and post an error bubble each time; instead report once and
+        # keep retrying on this connection until the client goes away.
+        cell = None
+        reported = False
+        while cell is None:
+            try:
+                cell = await asyncio.to_thread(self.awake, user)
+            except Exception as e:  # noqa: BLE001
+                if not reported:
+                    await ws.send_text(json.dumps({"type": "error", "message": f"Your cell is unavailable: {e}. Retrying in the background."}))
+                    reported = True
+                for _ in range(self.retry_after):
+                    await asyncio.sleep(1)
+                    try:
+                        await ws.send_text(json.dumps({"type": "ping"}))
+                    except Exception:  # noqa: BLE001  client left
+                        return
         upstream_url = self.addr(cell).replace("http", "ws", 1) + f"/v1/ws?token={urllib.parse.quote(cell['token'])}"
         try:
             async with websockets.connect(upstream_url, max_size=None) as up:
