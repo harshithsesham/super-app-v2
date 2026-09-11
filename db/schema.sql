@@ -4,6 +4,10 @@
 
 
 
+CREATE EXTENSION IF NOT EXISTS vector;
+
+
+
 CREATE SCHEMA IF NOT EXISTS "activity";
 
 CREATE SCHEMA IF NOT EXISTS "agent";
@@ -37,6 +41,132 @@ CREATE SCHEMA IF NOT EXISTS "self_improvement";
 CREATE SCHEMA IF NOT EXISTS "shell";
 
 CREATE SCHEMA IF NOT EXISTS "spaces";
+
+
+
+DO $$ BEGIN CREATE DOMAIN agent.context_item_kind AS text; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN CREATE DOMAIN runtime.event_kind AS text; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN CREATE DOMAIN runtime.message_role AS text; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN CREATE DOMAIN runtime.transcript_surface AS text; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN CREATE DOMAIN runtime.visibility AS text; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN CREATE DOMAIN scheduler.run_status AS text; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+CREATE SEQUENCE IF NOT EXISTS activity.activity_monitor_carrier_user_messages_link_seq_seq;
+
+CREATE SEQUENCE IF NOT EXISTS activity.activity_monitor_thread_actions_action_seq_seq;
+
+CREATE SEQUENCE IF NOT EXISTS agent.agent_compactions_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS agent.compactions_compaction_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS agent.context_item_fields_context_item_field_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS agent.context_items_context_item_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS agent.context_text_segments_context_text_segment_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS agent.subagent_monitor_decisions_decision_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS agent.subagent_progress_message_events_event_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS agent.subagent_progress_progress_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS agent.subagent_progress_tool_events_event_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS agent.subagent_spawns_spawn_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS agent.token_usage_token_usage_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS device.call_log_call_log_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS device.contact_addresses_contact_address_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS device.contact_emails_contact_email_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS device.contact_phones_contact_phone_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS device.contacts_contact_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS device.media_upload_events_global_seq_seq;
+
+CREATE SEQUENCE IF NOT EXISTS device.media_upload_events_media_upload_event_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS goals.actions_action_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS goals.momentum_history_history_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS goals.thread_actions_thread_action_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS goals.threads_thread_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS health.aggregates_aggregate_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS health.events_health_event_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS health.record_values_record_value_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS health.sample_values_sample_value_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS health.samples_sample_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS health.sleep_sessions_sleep_session_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS health.synced_ranges_synced_range_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS health.workouts_workout_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS ingest.data_source_events_event_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS ingest.data_source_events_global_seq_seq;
+
+CREATE SEQUENCE IF NOT EXISTS media.exif_values_exif_value_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS memory.embedding_models_embedding_model_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS memory.embeddings_memory_embedding_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS memory.entries_memory_entry_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS memory.entry_attributes_memory_entry_attribute_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS messages.native_message_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS runtime.channel_message_bindings_binding_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS runtime.event_payload_fields_event_payload_field_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS runtime.events_event_seq_seq;
+
+CREATE SEQUENCE IF NOT EXISTS runtime.message_attachments_attachment_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS runtime.raw_signal_entries_entry_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS runtime.resources_resource_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS runtime.search_documents_search_document_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS runtime.summaries_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS runtime.tool_calls_tool_call_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS runtime.tool_outputs_tool_output_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS scheduler.cron_mutations_mutation_seq_seq;
+
+CREATE SEQUENCE IF NOT EXISTS scheduler.events_scheduler_event_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS scheduler.job_definitions_job_definition_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS self_improvement.connector_read_audit_audit_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS spaces.action_arguments_action_argument_id_seq;
+
+CREATE SEQUENCE IF NOT EXISTS spaces.action_invocations_global_seq_seq;
 
 
 
@@ -940,7 +1070,7 @@ CREATE TABLE IF NOT EXISTS "feed"."units" (
     "manual_order" double precision,
     "seen_at_ms" bigint,
     "title" text,
-    "search_vector" tsvector DEFAULT to_tsvector('simple'::regconfig, "left"(((((((COALESCE(kicker, ''::text) \,
+    "search_vector" tsvector,
     "last_seen_at_ms" bigint,
     "timespent_ms" bigint,
     "social_thumbnail_url" text,
@@ -1532,7 +1662,7 @@ CREATE TABLE IF NOT EXISTS "ideas"."ideas" (
     "dedup_key" text,
     "expires_at" timestamp with time zone,
     "generator" text,
-    "search_vector" tsvector DEFAULT to_tsvector('simple'::regconfig, "left"(((((((COALESCE(title, ''::text) \,
+    "search_vector" tsvector,
     "prerequisite_notes" text,
     "build_summary" text,
     "category_index" bigint,

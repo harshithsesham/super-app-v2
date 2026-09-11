@@ -11,6 +11,7 @@ from .config import CONFIG
 from .tools import local, memory_tools  # noqa: F401  (registers handlers)
 from .agent import subagents  # noqa: F401
 from .browser import worker as _bw, web as _bweb  # noqa: F401
+from .scheduler import tools as _sched  # noqa: F401
 from .agent.loop import Agent
 
 console = Console()

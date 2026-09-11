@@ -53,10 +53,14 @@ Without those env vars the app shows a sign-in screen asking for the server URL 
 - [x] Browser worker: Playwright driver with referenced-element snapshots, `browser_task` role, live Browser card, approval on checkout-like steps (`superapp/browser/`)
 - [x] Hub page and voice orb from the earlier app, fed by this runtime (`superapp/hub.py`, `superapp/voice.py`, `apps/mobile/src/screens/HubScreen.tsx`, `apps/mobile/src/ui/Orb.tsx`)
 - [ ] Browser credential grants and takeover
-- [ ] Scheduler (cron tiers) and hooks, including the Gmail watch hook
+- [x] Persistence on the Muse schema: one Postgres database per user, transcript/tool/compaction/subagent/browser rows, restart checkpoints and recovery (`superapp/db.py`)
+- [x] Scheduler: cron jobs and event hooks with the captured tool contracts, worker roles, system jobs (hourly memory upkeep, daily brief) (`superapp/scheduler/`)
+- [ ] Gmail watch hook, proactive push notifications
 - [ ] Sentinel-style tool-call auditor (prompt is in `superapp/prompts/blocks/sentinel/`)
-- [ ] Deploy next to the existing API on the AWS box
-- [ ] Per-user sandbox provisioning, Google sign-in
+- [x] Deployed next to the existing API on the AWS box (`deploy/DEPLOY.md`)
+- [x] Google sign-in (`superapp/auth.py`)
+- [x] Runtime cell image: one Firecracker machine per user with its own Postgres, unprivileged tool user, idle exit and wake state (`deploy/cell/`)
+- [ ] Cell gateway: per-user machine provisioning on Fly, routing, wake for due jobs (`superapp/cells/`)
 
 ## Gmail setup
 

@@ -1,0 +1,33 @@
+# Fly app that holds every user's cell as one Machine. Build and push the image:
+#
+#   fly apps create muse-cells
+#   fly deploy --config deploy/cell/fly.toml --dockerfile deploy/cell/Dockerfile --build-only --push --image-label $(git rev-parse --short HEAD)
+#
+# Machines are NOT created by `fly deploy`; the gateway creates one per user
+# through the Machines API with this image, a volume at /data, and the cell
+# env (SUPERAPP_CELL_USER, SUPERAPP_CELL_TOKEN, META_API_KEY, connector secrets).
+# There are no public services: the gateway reaches cells over the private
+# network at <machine-id>.vm.muse-cells.internal:18792.
+app = "muse-cells"
+primary_region = "ord"
+
+[build]
+  dockerfile = "deploy/cell/Dockerfile"
+
+[env]
+  SUPERAPP_HOME_ROOT = "/data/users"
+  SUPERAPP_IDLE_EXIT_SECS = "600"
+  SUPERAPP_TZ = "America/Chicago"
+
+[[mounts]]
+  source = "cell_data"
+  destination = "/data"
+  initial_size = "10gb"
+
+[[restart]]
+  policy = "on-failure"
+  max_retries = 3
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "2gb"

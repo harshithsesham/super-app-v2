@@ -30,8 +30,10 @@ from .agent import subagents  # noqa: F401
 from .browser import worker as browser_worker, web as browser_web  # noqa: F401
 from .agent.loop import Agent
 from .agent import subagents as subagent_mod
-from . import auth, hub, voice
+from . import auth, db, hub, voice
 from .approvals import Approval, ApprovalStore
+from .scheduler import tools as scheduler_tools  # noqa: F401  registers cron.*, hooks.*, muse.nothing_to_do
+from .scheduler.engine import Engine
 from .connectors import vault
 from .connectors.gmail import GmailClient, configured as gmail_configured
 
@@ -46,10 +48,28 @@ os.environ.setdefault("SUPERAPP_PUBLIC_URL", os.environ["SUPERAPP_INTERNAL_URL"]
 INTERNAL_TOKEN = os.environ["SUPERAPP_INTERNAL_TOKEN"]
 PUBLIC_URL = os.environ["SUPERAPP_PUBLIC_URL"].rstrip("/")
 
+# Cell mode: this process serves exactly one user (one Firecracker machine per
+# user, Muse's runtime cell). The gateway authenticates the person and forwards
+# with the cell token. With SUPERAPP_IDLE_EXIT_SECS set, the daemon exits 0 once
+# nothing is happening and no scheduled work is near, so the machine stops; the
+# gateway starts it again on the next request or before the next due job.
+CELL_USER = os.environ.get("SUPERAPP_CELL_USER") or None
+CELL_TOKEN = os.environ.get("SUPERAPP_CELL_TOKEN") or None
+IDLE_EXIT_SECS = int(os.environ.get("SUPERAPP_IDLE_EXIT_SECS", "0") or 0)
+STARTED_AT = time.time()
+_last_activity = time.time()
+
+
+def touch():
+    global _last_activity
+    _last_activity = time.time()
+
 
 # ------------------------------------------------------------------ auth ----
 def token_map() -> dict[str, str]:
     m: dict[str, str] = {}
+    if CELL_USER and CELL_TOKEN:
+        return {CELL_TOKEN: CELL_USER}
     for pair in os.environ.get("SUPERAPP_USER_TOKENS", "").split(","):
         user, _, tok = pair.strip().partition(":")
         if user and tok:
@@ -65,6 +85,8 @@ def resolve_token(token: str | None) -> str | None:
     for known, user in token_map().items():
         if hmac.compare_digest(token, known):
             return user
+    if CELL_USER:
+        return None   # a cell has no sign-in sessions; the gateway owns those
     return auth.resolve_session(token)
 
 
@@ -110,8 +132,16 @@ class Room:
         self.sockets: set[WebSocket] = set()
         self.loop: asyncio.AbstractEventLoop | None = None
         self.events: list[dict] = []
+        self.store = None
+        try:
+            self.store = db.store_for(user)
+        except Exception as e:  # noqa: BLE001
+            self.events.append({"ts": time.time(), "kind": "store_error", "data": {"error": f"{type(e).__name__}: {e}"}})
+        # the root agent keeps a stable id per user so its rows and transcript survive restarts
         self.agent = Agent("chat", memory=self.memory, tz=os.environ.get("SUPERAPP_TZ", "America/Chicago"),
                            on_text=self._on_text, on_event=self._on_event)
+        self.agent.id = f"agent_root_{user}"
+        self.agent.store = self.store
         self._load_transcript()
         self._deliver_orig = self.agent.deliver
         self.agent.deliver = self._deliver  # type: ignore[method-assign]
@@ -120,6 +150,38 @@ class Room:
             on_resolved=lambda a: self._send({"type": "approval_resolved", "id": a.id, "decision": a.decision}))
         self.agent.approvals = self.approvals
         self.browser_tasks: dict[str, dict] = {}
+        self._recover()
+        self.scheduler = Engine(self)
+        self.agent.scheduler = self.scheduler
+
+    @property
+    def on_event(self):
+        return self._on_event
+
+    def _recover(self):
+        """After a restart: close out what was in flight and tell the agent, so it can pick up rather than wait forever."""
+        if self.store is None:
+            return
+        try:
+            notes = []
+            for cp in self.store.pending_checkpoints():
+                if cp["agent_id"] == self.agent.id:
+                    notes.append("your last turn was cut off mid-work" + (f" (you were handling: {cp['payload'].get('user_text', '')[:120]!r})"
+                                                                         if cp["payload"].get("user_text") else ""))
+                self.store.clear_checkpoint(cp["agent_id"])
+            n_sub = self.store.interrupt_open_spawns()
+            n_br = self.store.interrupt_open_browser_tasks()
+            n_runs = self.store.interrupt_open_runs()
+            if n_sub:
+                notes.append(f"{n_sub} subagent run(s) were interrupted and will not report back")
+            if n_br:
+                notes.append(f"{n_br} browser task(s) were interrupted; spawn again if still needed")
+            if n_runs:
+                notes.append(f"{n_runs} scheduled run(s) were interrupted; they are recorded as failed")
+            if notes:
+                self.agent.inbox.put("[Runtime] The daemon restarted. " + "; ".join(notes) + ". Check what was pending and continue or ask.")
+        except Exception as e:  # noqa: BLE001
+            self.events.append({"ts": time.time(), "kind": "store_error", "data": {"error": f"recover: {type(e).__name__}: {e}"}})
 
     # transcript persistence
     @property
@@ -127,11 +189,26 @@ class Room:
         return self.home / ".transcript.json"
 
     def _load_transcript(self):
+        if self.store is not None:
+            try:
+                rows = self.store.load_transcript(self.agent.id)
+                if rows:
+                    self.agent.transcript = rows
+                    return
+            except Exception as e:  # noqa: BLE001
+                self.events.append({"ts": time.time(), "kind": "store_error", "data": {"error": f"load: {type(e).__name__}: {e}"}})
         if self.transcript_path.exists():
             try:
                 self.agent.transcript = json.loads(self.transcript_path.read_text())
             except json.JSONDecodeError:
                 pass
+            # first boot with a database: carry the file transcript into it
+            if self.store is not None:
+                for entry in self.agent.transcript:
+                    try:
+                        self.store.record_transcript_entry(self.agent.id, entry)
+                    except Exception:  # noqa: BLE001
+                        break
 
     def _save_transcript(self):
         self.transcript_path.write_text(json.dumps(self.agent.transcript, default=str))
@@ -178,7 +255,7 @@ class Room:
             self._send({"type": "error", "message": f"{type(e).__name__}: {e}"})
             final = ""
         self._save_transcript()
-        self._send({"type": "turn_end", "text": final})
+        self._send({"type": "turn_end", "text": final, "silent": bool(self.agent.silent_turn)})
         return final
 
     def history(self) -> list[dict]:
@@ -357,10 +434,70 @@ def gmail_disconnect_link(state: str):
     return HTMLResponse("<p>Gmail disconnected.</p>")
 
 
+# --------------------------------------------------------------- cell mode ----
+@app.middleware("http")
+async def _activity(request, call_next):
+    if request.url.path != "/health":
+        touch()
+    return await call_next(request)
+
+
+def _busy(r: Room) -> bool:
+    if r.sockets or r.agent.status == "running" or r.scheduler.running or r.approvals.pending():
+        return True
+    if any(t.get("status") in ("queued", "running", "needs_user") for t in r.browser_tasks.values()):
+        return True
+    return subagent_mod.active_count(r.agent) > 0
+
+
+def cell_state() -> dict:
+    """What the gateway needs to decide when to stop and wake this cell."""
+    r = ROOMS.get(CELL_USER) if CELL_USER else None
+    due = r.scheduler.next_due() if r else {}
+    return {"user": CELL_USER, "idle_secs": int(time.time() - _last_activity), "busy": bool(r and _busy(r)),
+            "uptime_secs": int(time.time() - STARTED_AT), **due}
+
+
+def _idle_watch():
+    while True:
+        time.sleep(15)
+        r = ROOMS.get(CELL_USER)
+        if r is None or _busy(r) or time.time() - _last_activity < IDLE_EXIT_SECS:
+            continue
+        due = r.scheduler.next_due()
+        if due.get("hooks_active"):
+            continue   # a polling hook keeps the cell awake, as in Muse
+        nxt = due.get("next_due_utc")
+        if nxt and nxt - time.time() < 2 * IDLE_EXIT_SECS:
+            continue   # cheaper to stay up than to stop and be woken in a moment
+        print(f"cell {CELL_USER}: idle for {IDLE_EXIT_SECS}s, next job "
+              f"{'in %ds' % (nxt - time.time()) if nxt else 'none'}; exiting so the machine stops", flush=True)
+        os._exit(0)
+
+
+@app.on_event("startup")
+def _cell_boot():
+    if not CELL_USER:
+        return
+    room_for(CELL_USER)   # warm the agent and start its scheduler even with nobody connected
+    if IDLE_EXIT_SECS > 0:
+        threading.Thread(target=_idle_watch, daemon=True, name="idle-watch").start()
+
+
 # ------------------------------------------------------------------ REST ----
 @app.get("/health")
 def health():
-    return {"ok": True, "model": CONFIG.model, "users": len(ROOMS)}
+    out = {"ok": True, "model": CONFIG.model, "users": len(ROOMS), "db": db.enabled()}
+    if CELL_USER:
+        out["cell"] = cell_state()
+    return out
+
+
+@app.get("/v1/scheduler")
+def scheduler_state(user: str = Depends(current_user)):
+    r = room_for(user)
+    return {"status": r.scheduler.status(), "jobs": r.scheduler.list(include_disabled=True),
+            "hooks": list(r.scheduler.hooks.values()), "runs": r.store.runs(None, 20) if r.store else []}
 
 
 @app.get("/v1/me")
@@ -505,6 +642,7 @@ async def ws_endpoint(ws: WebSocket, token: str = Query("")):
         await ws.close(code=4401)
         return
     await ws.accept()
+    touch()
     r = room_for(user)
     r.loop = asyncio.get_running_loop()
     r.sockets.add(ws)
@@ -517,6 +655,7 @@ async def ws_endpoint(ws: WebSocket, token: str = Query("")):
                 frame = json.loads(raw)
             except json.JSONDecodeError:
                 continue
+            touch()
             if frame.get("type") == "message" and frame.get("text", "").strip():
                 if r.agent.status == "running":
                     await ws.send_text(json.dumps({"type": "error", "message": "still working on the last message"}))
@@ -530,3 +669,4 @@ async def ws_endpoint(ws: WebSocket, token: str = Query("")):
         pass
     finally:
         r.sockets.discard(ws)
+        touch()

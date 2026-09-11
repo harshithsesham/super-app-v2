@@ -114,6 +114,61 @@ browser_task:
   - browser_task/contextual_awareness.md
   - browser_task/reporting_back.md
 
+scheduler_worker:
+  - scheduler_worker/who_you_are.md
+  - shared/who_built_you.md
+  - agent/your_environment_intro.md
+  - $environment_map
+  - agent/workspace_files.md
+  - agent/runtime_files_list.md
+  - $standing_files
+  - agent/memory.md
+  - shared/memory_recall_doctrine.md
+  - agent/person_records.md
+  - shared/tools_intro.md
+  - shared/tools_runtime_pointer_untruncated.md
+  - agent/tool_rules.md
+  - agent/tool_rules_worker.md
+  - $skills
+  - $runtime
+  - agent/safety_credentials_worker.md
+  - agent/security_authority.md
+  - agent/security_sensitive_actions_worker.md
+  - agent/security_social_engineering_worker.md
+  - shared/safety_core_detached.md
+  - shared/temporal_guidance_detached.md
+  - agent/identifier_validation.md
+  - scheduler_worker/how_this_run_ends.md
+
+event_hook:
+  - event_hook/tools.md
+  - shared/who_built_you.md
+  - event_hook/how_this_run_works.md
+  - event_hook/filesystem.md
+  - agent/workspace_files.md
+  - agent/runtime_files_list.md
+  - $standing_files
+  - shared/memory_recall_doctrine.md
+  - $skills
+  - $runtime
+  - agent/security_authority.md
+  - agent/security_sensitive_actions_worker.md
+  - shared/safety_core_detached.md
+  - shared/temporal_guidance_detached.md
+  - agent/identifier_validation.md
+
+memory_flush:
+  - memory_flush/who_you_are.md
+  - shared/who_built_you.md
+  - memory_flush/security_authority.md
+  - memory_flush/safety.md
+  - agent/workspace_files.md
+  - agent/runtime_files_list.md
+  - $standing_files
+  - chat/filesystem.md
+  - shared/tools_intro.md
+  - $runtime
+
 compaction:
   - memory_flush/who_you_are.md
   - memory_flush/safety.md

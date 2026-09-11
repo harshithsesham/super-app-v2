@@ -10,6 +10,7 @@ report; `browser.steer_task` resumes a parked task with the parent's answer.
 """
 from __future__ import annotations
 import queue, re, threading, time, uuid
+from datetime import datetime, timezone
 from ..prompts import assembler
 from ..tools.registry import REGISTRY, ToolError
 from ..agent.loop import Agent
@@ -44,6 +45,7 @@ class TaskRunner(threading.Thread):
         self.agent.only_tools = {"muse.automation", "muse.browser_hand_off", "muse.visual_automation"}
         self.agent.browser_task = self  # type: ignore[attr-defined]
         self.agent.approvals = getattr(parent, "approvals", None)
+        self.agent.store = getattr(parent, "store", None)
 
     # ------------------------------------------------------------- public --
     def public(self) -> dict:
@@ -59,6 +61,20 @@ class TaskRunner(threading.Thread):
         self.parent.on_event("browser_step", {"task_id": self.id, "title": self.title, "status": self.status,
                                               "status_title": self.status_title, "url": self.url,
                                               "screenshot": self.screenshot})
+        if self.parent.store is not None:
+            terminal = self.status in ("completed", "failed", "stopped")
+            try:
+                self.parent.store.upsert_browser_task({
+                    "task_id": self.id, "owner_agent_id": self.parent.id, "parent_agent_id": self.parent.id, "status": self.status,
+                    "title": self.title, "step_count": self.step_count, "initial_instruction": self.instruction[:20000],
+                    "outcome_status": self.status if terminal or self.status == "needs_user" else None,
+                    "outcome_reason": self.report if terminal else None,
+                    "terminal_reason": {"completed": "browser_agent_completed", "failed": "browser_agent_reported_failure",
+                                        "stopped": "user_stop"}.get(self.status),
+                    "completed_at": datetime.now(timezone.utc) if terminal else None,
+                    "outcome_at": datetime.now(timezone.utc) if terminal or self.status == "needs_user" else None})
+            except Exception as e:  # noqa: BLE001
+                self.parent.on_event("store_error", {"agent": self.parent.id, "error": f"{type(e).__name__}: {e}"})
 
     # --------------------------------------------------------------- run ---
     def run(self):

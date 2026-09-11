@@ -1,0 +1,7 @@
+[
+  {"tool": {"namespace": "muse", "description": "Runtime decision tools.", "functions": [
+    {"name": "nothing_to_do",
+     "description": "After a handoff (a scheduled job result, a hook event, a background report), end the turn with no visible message because it is not worth the user's attention right now. Call it by itself instead of replying. Never use it to skip something the user arranged to receive.",
+     "parameters": {"type": "object", "properties": {"reason": {"type": "string", "description": "Short note for the activity log."}}, "additionalProperties": false}}
+  ]}}
+]

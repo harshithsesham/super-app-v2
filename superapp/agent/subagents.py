@@ -29,6 +29,11 @@ def _run(spawn: dict, message: str):
         spawn["final_response"] = f"{type(e).__name__}: {e}"
         report = f"(failed) {spawn['final_response']}"
     spawn["completed_at"] = time.time()
+    if parent.store is not None:
+        try:
+            parent.store.finish_spawn(child.id, spawn["status"], spawn["final_response"])
+        except Exception as e:  # noqa: BLE001
+            parent.on_event("store_error", {"agent": parent.id, "error": f"{type(e).__name__}: {e}"})
     parent.deliver(f"[Subagent Report] spawn_id={spawn['id']} label={spawn['label']} status={spawn['status']}\n{report}")
 
 
@@ -43,11 +48,18 @@ def spawn(message: str | None = None, items: list | None = None, label: str | No
         raise ToolError("a subagent needs a full brief in `message`")
     child = Agent(role="subagent", depth=parent.depth + 1, llm=parent.llm, memory=parent.memory, tz=parent.tz,
                   label=label, on_event=parent.on_event, parent=parent)
+    child.store = parent.store
+    child.approvals = parent.approvals
     spawn_rec = {"id": f"spawn_{child.id[6:]}", "agent": child, "parent": parent, "label": label or brief[:40],
                  "status": "queued", "created_at": time.time(), "completed_at": None, "final_response": None,
                  "child_depth": child.depth, "prompt": brief}
     with _lock:
         SPAWNS[spawn_rec["id"]] = spawn_rec
+    if parent.store is not None:
+        try:
+            parent.store.record_spawn(parent.id, child.id, brief, child.depth)
+        except Exception as e:  # noqa: BLE001
+            parent.on_event("store_error", {"agent": parent.id, "error": f"{type(e).__name__}: {e}"})
     POOL.submit(_run, spawn_rec, f"[Subagent Task]\n{brief}")
     parent.on_event("subagent_spawn", {"spawn_id": spawn_rec["id"], "label": spawn_rec["label"]})
     return {"spawn_id": spawn_rec["id"], "status": "running",
@@ -66,6 +78,18 @@ def list_(_ctx: dict | None = None):
     me = _ctx["agent"].id if _ctx else None
     return {"subagents": [{"spawn_id": s["id"], "label": s["label"], "status": s["status"], "depth": s["child_depth"]}
                           for s in SPAWNS.values() if me is None or s["parent"].id == me]}
+
+
+def active_count(root: "Agent") -> int:
+    """Queued or running spawns anywhere under this root agent; the cell's idle-exit checks it."""
+    def under(a):
+        while a is not None:
+            if a is root:
+                return True
+            a = a.parent
+        return False
+    with _lock:
+        return sum(1 for s in SPAWNS.values() if s["status"] in ("queued", "running") and under(s["parent"]))
 
 
 @REGISTRY.register("subagent.send")

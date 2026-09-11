@@ -10,7 +10,7 @@ Compaction summarizes the older transcript when it grows past the
 configured budget, keeping the summary at the front, as Muse does.
 """
 from __future__ import annotations
-import json, queue, threading, uuid
+import json, queue, threading, time, uuid
 from typing import Callable
 from ..config import CONFIG
 from ..llm import LLM
@@ -51,7 +51,10 @@ class Agent:
         self._lock = threading.Lock()
         self.only_tools: set[str] | None = None   # a worker role with a fixed tool set (browser task)
         self.stop_after_tools = False              # set by a hand-off tool to end the run after this round
+        self.silent_turn = False                   # set by muse.nothing_to_do: end with no visible message
         self.approvals = None                      # ApprovalStore, attached by the daemon
+        self.store = None                          # db.Store, attached by the daemon; None in file-only mode
+        self.scheduler = None                      # scheduler.Engine, attached by the daemon to the root agent
         # doctrine: subagents never get the browser, wallet, or purchase surfaces; depth>=2 cannot spawn
         self.exclude_ns: set[str] = set()
         if role != "chat":
@@ -65,13 +68,22 @@ class Agent:
         self.inbox.put(text)
         self.on_event("handoff", {"agent": self.id, "text": text[:200]})
 
+    def _append(self, entry: dict):
+        """Every transcript entry goes to memory and, when a store is attached, to Postgres."""
+        self.transcript.append(entry)
+        if self.store is not None:
+            try:
+                self.store.record_transcript_entry(self.id, entry)
+            except Exception as e:  # noqa: BLE001
+                self.on_event("store_error", {"agent": self.id, "error": f"{type(e).__name__}: {e}"})
+
     def _drain_inbox(self):
         while True:
             try:
                 text = self.inbox.get_nowait()
             except queue.Empty:
                 return
-            self.transcript.append({"role": "user", "content": f"{self._time_tag()} [runtime handoff]\n{text}"})
+            self._append({"role": "user", "content": f"{self._time_tag()} [runtime handoff]\n{text}"})
 
     # -------------------------------------------------------------- prompt --
     def _time_tag(self) -> str:
@@ -114,6 +126,11 @@ class Agent:
         summary = self.llm.quick(COMPACTION_PROMPT, text[-200000:], effort="low", max_tokens=4000)
         self.transcript = ([{"role": "user", "content": "[Earlier conversation summary from compaction]\n" + summary}]
                            + self.transcript[keep_from:])
+        if self.store is not None:
+            try:
+                self.store.record_compaction(self.id, summary, keep_from)
+            except Exception as e:  # noqa: BLE001
+                self.on_event("store_error", {"agent": self.id, "error": f"{type(e).__name__}: {e}"})
         self.on_event("compaction", {"agent": self.id, "kept": len(self.transcript)})
 
     # ---------------------------------------------------------------- turn --
@@ -127,34 +144,51 @@ class Agent:
 
     def _run_turn(self, user_text: str | None) -> str:
         CONFIG.set_home(self.memory.home)  # tools resolve ~ against this agent's home on this thread
+        if self.store is not None:
+            try:
+                self.store.upsert_agent(self.id, "root" if self.depth == 0 else self.role, "running", self.depth,
+                                        getattr(self.parent, "id", None), self.llm.model, self.role)
+                self.store.checkpoint(self.id, "before_inference", {"user_text": (user_text or "")[:2000], "started_at": time.time()},
+                                      "foreground_root" if self.depth == 0 else "detached_worker")
+            except Exception as e:  # noqa: BLE001
+                self.on_event("store_error", {"agent": self.id, "error": f"{type(e).__name__}: {e}"})
         self._drain_inbox()
         if user_text is not None:
-            self.transcript.append({"role": "user", "content": f"{self._time_tag()}\n{user_text}"})
+            self._append({"role": "user", "content": f"{self._time_tag()}\n{user_text}"})
         tools = REGISTRY.openai_tools(self.exclude_ns, self.only_tools)
         effort = CONFIG.effort("root_agent" if self.depth == 0 else "subagent")
         final_text = ""
         self.stop_after_tools = False
-        for _ in range(MAX_TOOL_ROUNDS):
-            if self.closed:
-                return "[closed]"
-            self._maybe_compact()
-            messages = [{"role": "system", "content": self.system_prompt()}] + self.transcript
-            content, tool_calls = self._stream_completion(messages, tools, effort)
-            msg: dict = {"role": "assistant", "content": content or ""}
-            if tool_calls:
-                msg["tool_calls"] = tool_calls
-            self.transcript.append(msg)
-            if not tool_calls:
-                final_text = content or ""
-                break
-            for tc in tool_calls:
-                self.transcript.append({"role": "tool", "tool_call_id": tc["id"], "content": self._run_tool(tc)})
-            if self.stop_after_tools:
-                final_text = content or ""
-                break
-            self._drain_inbox()
-        else:
-            final_text = "I hit my tool budget for this turn. Here is where things stand: " + (content or "")
+        self.silent_turn = False
+        try:
+            for _ in range(MAX_TOOL_ROUNDS):
+                if self.closed:
+                    return "[closed]"
+                self._maybe_compact()
+                messages = [{"role": "system", "content": self.system_prompt()}] + self.transcript
+                content, tool_calls = self._stream_completion(messages, tools, effort)
+                msg: dict = {"role": "assistant", "content": content or ""}
+                if tool_calls:
+                    msg["tool_calls"] = tool_calls
+                self._append(msg)
+                if not tool_calls:
+                    final_text = content or ""
+                    break
+                for tc in tool_calls:
+                    self._append({"role": "tool", "tool_call_id": tc["id"], "content": self._run_tool(tc)})
+                if self.stop_after_tools:
+                    final_text = "" if self.silent_turn else (content or "")
+                    break
+                self._drain_inbox()
+            else:
+                final_text = "I hit my tool budget for this turn. Here is where things stand: " + (content or "")
+        finally:
+            if self.store is not None:
+                try:
+                    self.store.clear_checkpoint(self.id)
+                    self.store.set_agent_status(self.id, "idle" if not self.closed else "closed", final_text or None)
+                except Exception as e:  # noqa: BLE001
+                    self.on_event("store_error", {"agent": self.id, "error": f"{type(e).__name__}: {e}"})
         return final_text
 
     def _stream_completion(self, messages, tools, effort):
@@ -183,6 +217,12 @@ class Agent:
         tool_calls = [calls[i] for i in sorted(calls)]
         for tc in tool_calls:
             tc["id"] = tc["id"] or f"call_{uuid.uuid4().hex[:8]}"
+            # the API rejects any later request whose history holds non-JSON arguments, so never let one in
+            raw = tc["function"]["arguments"] or "{}"
+            try:
+                json.loads(raw)
+            except json.JSONDecodeError:
+                tc["function"]["arguments"] = json.dumps({"_invalid_arguments": raw[:4000]})
         return "".join(content_parts), tool_calls
 
     def _run_tool(self, tc: dict) -> str:
@@ -191,6 +231,10 @@ class Agent:
             args = json.loads(tc["function"]["arguments"] or "{}")
         except json.JSONDecodeError as e:
             return json.dumps({"status": "error", "code": "bad_arguments", "message": str(e)})
+        if "_invalid_arguments" in args:
+            return json.dumps({"status": "error", "code": "bad_arguments",
+                               "message": "Your tool call arguments were not valid JSON (often an unescaped quote or newline in a long "
+                                          "string). Call the tool again with valid JSON; for big file contents, keep them shorter or split them."})
         self.on_event("tool_call", {"agent": self.id, "tool": unwire(name), "args": args})
         ctx = {"agent": self, "on_background_finish": self._on_background_finish}
         try:
