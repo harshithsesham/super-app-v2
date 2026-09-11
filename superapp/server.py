@@ -369,7 +369,11 @@ class Room:
         rec = {"ts": time.time(), "kind": kind, "data": data}
         self.events.append(rec)
         del self.events[:-500]
-        self._send({"type": "event", "kind": kind, "data": data, "ts": rec["ts"]})
+        # Work done by a scheduled worker, a hook worker, or a subagent is background: the app logs it
+        # in the activity sheet but must not show it as the chat agent still working on the user's turn.
+        agent = data.get("agent") if isinstance(data, dict) else None
+        background = kind in ("scheduled_run", "scheduled_skip", "hook_poll", "hook_wake") or (agent is not None and agent != self.agent.id)
+        self._send({"type": "event", "kind": kind, "data": data, "ts": rec["ts"], "background": background})
 
     def _deliver(self, text: str):
         """A handoff arrived (subagent report, finished command). If idle, run a turn so the agent reacts."""

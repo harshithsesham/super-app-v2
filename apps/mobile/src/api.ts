@@ -26,7 +26,7 @@ export type Frame =
   | { type: "history"; messages: ChatMessage[]; assistant: string; status: string }
   | { type: "turn_start"; user_text: string | null }
   | { type: "text_delta"; text: string }
-  | { type: "event"; kind: string; data: Record<string, any>; ts: number }
+  | { type: "event"; kind: string; data: Record<string, any>; ts: number; background?: boolean }
   | { type: "turn_end"; text: string }
   | { type: "approval"; approval: Approval }
   | { type: "approval_resolved"; id: string; decision: string }

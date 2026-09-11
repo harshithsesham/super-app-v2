@@ -136,6 +136,11 @@ function App() {
         break;
       case "event": {
         setLiveEvents((e) => [...e.slice(-200), { ts: f.ts, kind: f.kind, data: f.data }]);
+        if (f.background) {
+          // a scheduled job, hook, or subagent working behind the scenes: a passing status line, never a chat card
+          if (f.kind === "scheduled_run" && f.data?.status === "running") showNotice(`In the background: ${f.data?.title ?? "scheduled work"}`);
+          break;
+        }
         const line = describe(f.kind, f.data);
         if (line) setLive((l) => ({ text: l?.text ?? "", steps: [...(l?.steps ?? []), line] }));
         break;
