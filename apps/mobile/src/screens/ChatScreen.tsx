@@ -2,8 +2,8 @@
 // agent on the left, pale-blue bubbles from you on the right, cards inline
 // for work in progress, a typing bubble while it thinks, and a "+ Message"
 // pill with a mic at the bottom.
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import { FlatList, StyleSheet, Text, TextInput, View } from "react-native";
 import { Pressable } from "../ui/Tap";
 import { MicIcon } from "../ui/Icons";
 import { C, R } from "../theme";
@@ -94,19 +94,13 @@ export function ChatScreen({
   card?: React.ReactNode;   // an inline card that follows the thread (browser task)
 }) {
   const [draft, setDraft] = useState("");
-  const list = useRef<FlatList<Row>>(null);
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = messages.map((m, i) => ({ key: `m${i}`, kind: "msg", msg: m }));
     if (card) out.push({ key: "card", kind: "card" });
     if (live) out.push({ key: "live", kind: "live", live });
-    return out;
+    return out.reverse();   // inverted list: index 0 is the newest, pinned at the bottom
   }, [messages, live, card]);
-
-  useEffect(() => {
-    const t = setTimeout(() => list.current?.scrollToEnd({ animated: true }), 60);
-    return () => clearTimeout(t);
-  }, [rows.length, live?.text.length, live?.steps.length]);
 
   const send = useCallback(() => {
     const text = draft.trim();
@@ -157,16 +151,17 @@ export function ChatScreen({
   };
 
   return (
-    <KeyboardAvoidingView style={s.root} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={110}>
+    <View style={s.root}>
       <FlatList
-        ref={list}
         data={rows}
         keyExtractor={(r) => r.key}
         renderItem={render}
         contentContainerStyle={s.list}
         keyboardDismissMode="interactive"
+        inverted
+        maintainVisibleContentPosition={{ minIndexForVisible: 0, autoscrollToTopThreshold: 120 }}
         ListEmptyComponent={
-          <View style={s.empty}>
+          <View style={[s.empty, { transform: [{ scaleY: -1 }] }]}>
             <Text style={s.emptyTitle}>Hi, I'm {assistant}.</Text>
             <Text style={s.emptySub}>Your personal agent. Tell me your name, what to call you, and what's on your plate. I'll remember, and I'll get to work.</Text>
           </View>
@@ -202,13 +197,13 @@ export function ChatScreen({
           )}
         </View>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
-  list: { paddingHorizontal: 14, paddingTop: 6, paddingBottom: 12, gap: 8 },
+  list: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 6, gap: 8 },  // inverted: top is visual bottom
   agentCol: { alignItems: "flex-start", gap: 8, maxWidth: "88%" },
   userCol: { alignItems: "flex-end" },
   agentBubble: { backgroundColor: C.bubbleAgent, borderRadius: R.bubble, paddingHorizontal: 16, paddingVertical: 12 },

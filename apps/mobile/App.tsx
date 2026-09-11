@@ -8,7 +8,7 @@ import { InstrumentSans_400Regular, InstrumentSans_600SemiBold } from "@expo-goo
 import { InstrumentSerif_400Regular } from "@expo-google-fonts/instrument-serif";
 import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Pressable } from "./src/ui/Tap";
 import { Avatar } from "./src/ui/Avatar";
@@ -87,7 +87,23 @@ function App() {
   const [lastReply, setLastReply] = useState<{ seq: number; text: string } | null>(null);
   const [speak, setSpeak] = useState<{ seq: number; text: string } | null>(null);
   const [canSpeak, setCanSpeak] = useState(false);
+  const [keyboard, setKeyboard] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const socket = useRef<AgentSocket | null>(null);
+
+  // Runtime problems show as a passing line under the name, never as chat bubbles.
+  const showNotice = useCallback((text: string) => {
+    setNotice(text);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), 8000);
+  }, []);
+
+  useEffect(() => {
+    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () => setKeyboard(true));
+    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setKeyboard(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -139,7 +155,7 @@ function App() {
         break;
       case "error":
         setBusy(false); setLive(null);
-        setMessages((m) => [...m, { role: "assistant", text: `Something went wrong: ${f.message}` }]);
+        showNotice(f.message);
         break;
     }
   }, []);
@@ -188,13 +204,14 @@ function App() {
   if (page === "connectors") return <SafeAreaView style={s.root} edges={["top"]}><Stars /><StatusBar style="light" /><ConnectorsScreen api={api} onBack={() => setPage(null)} /></SafeAreaView>;
   if (page === "memory") return <SafeAreaView style={s.root} edges={["top"]}><Stars /><StatusBar style="light" /><MemoryScreen api={api} onBack={() => setPage(null)} /></SafeAreaView>;
 
-  const status = busy ? statusTitle(live?.steps ?? []) : connection === "open" ? null : "Reconnecting…";
+  const status = notice ?? (busy ? statusTitle(live?.steps ?? []) : connection === "open" ? null : "Reconnecting…");
   const showHeader = tab !== "hub";
 
   return (
     <SafeAreaView style={s.root} edges={["top", "left", "right"]}>
       <Stars />
       <StatusBar style="light" />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       {showHeader ? (
         <View style={s.header}>
           {tab === "chat" ? (
@@ -235,7 +252,7 @@ function App() {
 
       <Orb session={session} assistant={assistant} busy={busy} lastReply={lastReply} onSend={sendFromOrb} speak={speak} canSpeak={canSpeak} />
 
-      <View style={s.tabWrap}>
+      {keyboard ? null : <View style={s.tabWrap}>
         <View style={s.tabBar}>
           {([
             ["hub", HubIcon], ["chat", ChatIcon], ["ideas", IdeasIcon], ["goals", GoalsIcon], ["library", LibraryIcon],
@@ -245,7 +262,8 @@ function App() {
             </Pressable>
           ))}
         </View>
-      </View>
+      </View>}
+      </KeyboardAvoidingView>
 
       <MenuSheet visible={menu} assistant={assistant} onClose={() => setMenu(false)}
         onOpen={(sc) => { setMenu(false); if (sc === "signout") signOut(); else setPage(sc); }} />

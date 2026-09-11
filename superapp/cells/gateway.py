@@ -123,9 +123,10 @@ class Cells:
             cell["last_state"] = m.get("state")
             if m.get("private_ip"):
                 cell["private_ip"] = m["private_ip"]
-            if m.get("state") not in ("started", "starting"):
+            if m.get("state") not in ("started", "starting", "created", "replacing"):
                 print(f"gateway: waking cell {user} ({m.get('state')})", flush=True)
                 self.fly.start(cell["machine_id"])
+            if m.get("state") != "started":   # a just-created or starting machine only needs waiting for
                 try:
                     self.fly.wait(cell["machine_id"], "started", 60)
                 except FlyError:
@@ -236,30 +237,49 @@ class Cells:
             await ws.close(code=4401)
             return
         await ws.accept()
+        # Read the app's frames from the start so nothing typed while the cell boots is lost;
+        # they are replayed to the cell once it is up. None marks the client leaving.
+        inbox: asyncio.Queue = asyncio.Queue()
+
+        async def reader():
+            try:
+                while True:
+                    await inbox.put(await ws.receive_text())
+            except Exception:  # noqa: BLE001
+                await inbox.put(None)
+
+        reader_task = asyncio.create_task(reader())
         # Hold the socket while the cell comes up. Closing it on failure would make the app
         # reconnect immediately and post an error bubble each time; instead report once and
         # keep retrying on this connection until the client goes away.
         cell = None
         reported = False
-        while cell is None:
-            try:
-                cell = await asyncio.to_thread(self.awake, user)
-            except Exception as e:  # noqa: BLE001
-                if not reported:
-                    await ws.send_text(json.dumps({"type": "error", "message": f"Your cell is unavailable: {e}. Retrying in the background."}))
-                    reported = True
-                for _ in range(self.retry_after):
-                    await asyncio.sleep(1)
-                    try:
-                        await ws.send_text(json.dumps({"type": "ping"}))
-                    except Exception:  # noqa: BLE001  client left
-                        return
-        upstream_url = self.addr(cell).replace("http", "ws", 1) + f"/v1/ws?token={urllib.parse.quote(cell['token'])}"
         try:
+            while cell is None:
+                try:
+                    cell = await asyncio.to_thread(self.awake, user)
+                except Exception as e:  # noqa: BLE001
+                    if not reported:
+                        await ws.send_text(json.dumps({"type": "error", "message": f"Your cell is unavailable: {e}. Retrying in the background."}))
+                        reported = True
+                    for _ in range(self.retry_after):
+                        await asyncio.sleep(1)
+                        if reader_task.done():
+                            return
+                        try:
+                            await ws.send_text(json.dumps({"type": "ping"}))
+                        except Exception:  # noqa: BLE001  client left
+                            return
+            if reported:
+                await ws.send_text(json.dumps({"type": "error", "message": "Your cell is up."}))
+            upstream_url = self.addr(cell).replace("http", "ws", 1) + f"/v1/ws?token={urllib.parse.quote(cell['token'])}"
             async with websockets.connect(upstream_url, max_size=None) as up:
                 async def app_to_cell():
                     while True:
-                        await up.send(await ws.receive_text())
+                        item = await inbox.get()
+                        if item is None:
+                            return
+                        await up.send(item)
 
                 async def cell_to_app():
                     async for msg in up:
@@ -273,6 +293,7 @@ class Cells:
         except Exception:  # noqa: BLE001  (client disconnects arrive as exceptions from either side)
             pass
         finally:
+            reader_task.cancel()
             try:
                 await ws.close()
             except Exception:  # noqa: BLE001
