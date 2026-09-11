@@ -133,3 +133,13 @@ def user_record(uid: str) -> dict:
 
 def app_redirect(uid: str, name: str, token: str) -> str:
     return "superapp://signed-in?" + urllib.parse.urlencode({"token": token, "user": uid, "name": name})
+
+
+def import_data(data: dict) -> dict:
+    """Merge users and sessions exported from another daemon (migration into the gateway)."""
+    with _lock:
+        cur = _load()
+        cur["users"].update(data.get("users", {}))
+        cur["sessions"].update(data.get("sessions", {}))
+        _save(cur)
+        return {"users": len(cur["users"]), "sessions": len(cur["sessions"])}

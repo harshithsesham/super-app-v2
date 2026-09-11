@@ -60,7 +60,9 @@ Without those env vars the app shows a sign-in screen asking for the server URL 
 - [x] Deployed next to the existing API on the AWS box (`deploy/DEPLOY.md`)
 - [x] Google sign-in (`superapp/auth.py`)
 - [x] Runtime cell image: one Firecracker machine per user with its own Postgres, unprivileged tool user, idle exit and wake state (`deploy/cell/`)
-- [ ] Cell gateway: per-user machine provisioning on Fly, routing, wake for due jobs (`superapp/cells/`)
+- [x] Cell gateway: per-user machine provisioning through the Fly Machines API, REST + WebSocket proxy, wake on demand and ahead of due jobs (`superapp/cells/`, `scripts/fake_fly.py` for local runs)
+- [x] Migration of a user from the shared daemon into a cell (`scripts/migrate_cell.py`, cell `/internal/import`)
+- [ ] Production cutover to Fly: gateway machine deployed, user migrated, Caddy pointed at the gateway
 
 ## Gmail setup
 

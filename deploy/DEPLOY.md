@@ -83,8 +83,59 @@ Push the image to Fly (machines are created per user by the gateway, not by `fly
 
 ```bash
 fly apps create muse-cells
-fly deploy --config deploy/cell/fly.toml --dockerfile deploy/cell/Dockerfile --build-only --push --image-label $(git rev-parse --short HEAD)
+fly deploy --config fly.cells.toml --build-only --push --image-label $(git rev-parse --short HEAD)
 ```
 
 Next: the gateway (`superapp/cells/`) that signs users in, creates a volume and machine per user through the
 Machines API, proxies REST and WebSocket traffic to `<machine>.vm.muse-cells.internal:18792`, and wakes cells for due jobs.
+
+## Gateway: the control plane in front of cells
+
+With `SUPERAPP_CELLS=fly` the daemon runs as the gateway (`superapp/cells/gateway.py`): no agent in-process. It keeps
+Google sign-in and the session store, holds the registry `<HOME_ROOT>/.cells.json` (user -> machine, volume, cell token,
+vault key), creates a volume and a machine on a user's first request or sign-in, proxies every `/v1/*` call and the
+WebSocket to `http://[<private_ip>]:18792` on the cell, starts a stopped machine on demand (first response takes a few
+seconds), and starts machines `SUPERAPP_CELL_WAKE_LEAD_SECS` (default 120) before their next due job. Cells post their
+next-due time to `/internal/cells/state` when they idle out. Gmail connect/callback links are routed by the user encoded
+in their signed state. `GET /internal/cells` (header `X-Internal-Token`) lists the fleet.
+
+Gateway env:
+
+```bash
+SUPERAPP_CELLS=fly
+FLY_API_TOKEN=<fly tokens create deploy -a muse-cells>
+FLY_CELLS_APP=muse-cells
+FLY_CELLS_IMAGE=registry.fly.io/muse-cells:<label>
+FLY_CELLS_REGION=ord
+FLY_CELLS_MEMORY_MB=2048            # shared-cpu-1x
+FLY_CELLS_VOLUME_GB=10
+SUPERAPP_GATEWAY_URL=http://<gateway private host>:18792   # how cells reach the gateway to report state
+SUPERAPP_CELL_IDLE_EXIT_SECS=600
+# plus everything a cell needs, passed through at machine creation: META_API_KEY, MODEL, SUPERAPP_GOOGLE_CLIENT_ID/SECRET,
+# SUPERAPP_GOOGLE_REDIRECT_URI, SUPERAPP_PUBLIC_URL, SUPERAPP_TZ, SUPERAPP_ELEVENLABS_API_KEY, SUPERAPP_VOICE_ID
+```
+
+The gateway must sit on the Fly private network to reach cells. Simplest: run it as one more Fly machine in the same
+org (public service on 443, `fly.toml` for it to follow), and point Caddy's `handle_path /muse/*` at it, or point the app
+straight at it. Rotating a cell's secrets or image means recreating its machine (the volume and data stay).
+
+Local test without a Fly account: `scripts/fake_fly.py` serves the Machines API over Docker containers on a `cells`
+network. Run it, then the gateway image on that network with `FLY_API_BASE=http://host.docker.internal:18795`,
+`FLY_CELLS_IMAGE=muse-cell`, `FLY_CELL_ADDR_TEMPLATE=http://{private_ip}:18792`, and `SUPERAPP_GATEWAY_URL=http://<gateway container>:18792`.
+Verified locally: first message provisions a cell in ~8s, WebSocket bridge, idle exit with state report, wake ahead of a
+scheduled reminder, delivery, and sleep again.
+
+## Going live on Fly and migrating a user
+
+1. Push the cell image (repeat with a new label whenever `superapp/` changes; then update `FLY_CELLS_IMAGE` in
+   `fly.gateway.toml` and redeploy the gateway. Existing machines keep their old image until recreated):
+   `fly deploy --config fly.cells.toml --build-only --push --image-label v2`
+2. Gateway app: `fly apps create muse-gateway`, set its secrets (see the header of `fly.gateway.toml`; `FLY_API_TOKEN` is
+   a deploy token for `muse-cells`), then `fly deploy --config fly.gateway.toml`. Check `https://muse-gateway.fly.dev/health`
+   shows `"gateway": true`.
+3. Migrate a user from the AWS box (exports home + `muse_<user>` dump + sign-in sessions + old vault key, imports into
+   the cell, which restarts itself): `scripts/migrate_cell.py --user <uid> --ssh ubuntu@<box> --gateway https://muse-gateway.fly.dev --internal-token <gateway SUPERAPP_INTERNAL_TOKEN>`.
+   Verified locally end to end: 12 home entries, database restored, history and memory visible through the gateway.
+4. Cut over: in `/opt/super-app/deploy/Caddyfile` change the `/muse/*` upstream from `muse-daemon:18792` to
+   `https://muse-gateway.fly.dev` (with `header_up Host muse-gateway.fly.dev`), reload Caddy, then stop `muse-daemon`.
+   The app keeps using `https://app.nutrishiksha.com/muse`, so Google redirect URIs stay valid.

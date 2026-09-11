@@ -1,7 +1,9 @@
 # Fly app that holds every user's cell as one Machine. Build and push the image:
 #
 #   fly apps create muse-cells
-#   fly deploy --config deploy/cell/fly.toml --dockerfile deploy/cell/Dockerfile --build-only --push --image-label $(git rev-parse --short HEAD)
+#   fly deploy --config fly.cells.toml --build-only --push --image-label $(git rev-parse --short HEAD)
+#
+# (lives at the repo root so the build context includes superapp/, skills/, etc.)
 #
 # Machines are NOT created by `fly deploy`; the gateway creates one per user
 # through the Machines API with this image, a volume at /data, and the cell

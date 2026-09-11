@@ -62,3 +62,16 @@ def delete(provider: str, home: pathlib.Path | None = None) -> bool:
 
 def providers(home: pathlib.Path | None = None) -> list[str]:
     return sorted(p.stem for p in _dir(home).glob("*.enc"))
+
+
+def rekey(home: pathlib.Path, old_key: str) -> list[str]:
+    """Re-encrypt every provider blob under this home from `old_key` to the current key (cell import)."""
+    done = []
+    for p in _dir(home).glob("*.enc"):
+        try:
+            data = json.loads(Fernet(old_key.encode()).decrypt(p.read_bytes()))
+        except (InvalidToken, json.JSONDecodeError, ValueError):
+            continue
+        store(p.stem, data, home)
+        done.append(p.stem)
+    return done

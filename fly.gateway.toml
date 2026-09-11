@@ -1,0 +1,47 @@
+# The gateway as one Fly machine in the same org as the cells: public HTTPS in,
+# private 6PN out to each user's cell. It must stay running (it wakes cells for
+# scheduled jobs), hence auto_stop off. State on the volume: /data/users/.sessions.json
+# (sign-ins) and /data/users/.cells.json (the fleet registry).
+#
+#   fly apps create muse-gateway
+#   fly secrets set -a muse-gateway META_API_KEY=... FLY_API_TOKEN=... SUPERAPP_GOOGLE_CLIENT_ID=... \
+#       SUPERAPP_GOOGLE_CLIENT_SECRET=... SUPERAPP_API_TOKEN=... SUPERAPP_INTERNAL_TOKEN=... SUPERAPP_ELEVENLABS_API_KEY=...
+#   fly deploy --config fly.gateway.toml
+app = "muse-gateway"
+primary_region = "ord"
+
+[build]
+  dockerfile = "deploy/Dockerfile"
+
+[env]
+  SUPERAPP_CELLS = "fly"
+  FLY_CELLS_APP = "muse-cells"
+  FLY_CELLS_IMAGE = "registry.fly.io/muse-cells:v1"
+  FLY_CELLS_REGION = "ord"
+  FLY_CELLS_MEMORY_MB = "2048"
+  FLY_CELLS_VOLUME_GB = "10"
+  SUPERAPP_HOME_ROOT = "/data/users"
+  SUPERAPP_GATEWAY_URL = "http://muse-gateway.internal:18792"
+  SUPERAPP_PUBLIC_URL = "https://app.nutrishiksha.com/muse"
+  SUPERAPP_GOOGLE_REDIRECT_URI = "https://app.nutrishiksha.com/muse/v1/gmail/callback"
+  SUPERAPP_GOOGLE_SIGNIN_REDIRECT_URI = "https://app.nutrishiksha.com/muse/v1/auth/google/callback"
+  SUPERAPP_GMAIL_SCOPE_TIER = "modify"
+  SUPERAPP_TZ = "America/Chicago"
+  SUPERAPP_CELL_IDLE_EXIT_SECS = "600"
+  SUPERAPP_LOG_LEVEL = "info"
+
+[http_service]
+  internal_port = 18792
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[mounts]]
+  source = "gw_data"
+  destination = "/data"
+  initial_size = "1gb"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

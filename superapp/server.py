@@ -17,8 +17,9 @@ WebSocket protocol at /v1/ws?token=...:
 """
 from __future__ import annotations
 import asyncio, hashlib, hmac, json, os, pathlib, secrets, threading, time, urllib.parse
+import httpx
 from typing import Any
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -36,6 +37,7 @@ from .scheduler import tools as scheduler_tools  # noqa: F401  registers cron.*,
 from .scheduler.engine import Engine
 from .connectors import vault
 from .connectors.gmail import GmailClient, configured as gmail_configured
+from .cells import gateway
 
 app = FastAPI(title="superapp daemon", version="0.1.0")
 _bearer = HTTPBearer(auto_error=False)
@@ -109,7 +111,10 @@ def google_callback(code: str = "", state: str = "", error: str = ""):
     except PermissionError as e:
         raise HTTPException(403, str(e))
     uid, name, token = auth.complete_signin(identity)
-    room_for(uid)  # provision the home now so the first message is instant
+    if CELLS:
+        threading.Thread(target=CELLS.ensure_cell, args=(uid,), daemon=True).start()  # machine + volume for a new user
+    else:
+        room_for(uid)  # provision the home now so the first message is instant
     return RedirectResponse(auth.app_redirect(uid, name, token))
 
 
@@ -118,6 +123,99 @@ def current_user(creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) 
     if not user:
         raise HTTPException(401, "Invalid token")
     return user
+
+
+# ----------------------------------------------------------------- gateway ----
+# In gateway mode this process runs no agent: /v1/* and the WebSocket are proxied
+# to the user's own cell (a machine per user); sign-in and the cell registry stay here.
+CELLS: gateway.Cells | None = None
+if gateway.enabled():
+    CELLS = gateway.Cells(resolve_token, pathlib.Path(os.environ.get("SUPERAPP_HOME_ROOT", "~/.superapp/users")).expanduser())
+    app.add_middleware(gateway.GatewayMiddleware, cells=CELLS)
+
+
+@app.post("/internal/cells/state")
+def cell_report(body: dict, x_cell_token: str = Header("")):
+    """A cell reports its idle/next-due state on its way out, so the gateway knows when to wake it."""
+    if not CELLS or not CELLS.report_state(str((body or {}).get("user", "")), x_cell_token, body or {}):
+        raise HTTPException(403, "unknown cell")
+    return {"ok": True}
+
+
+@app.post("/internal/sessions/import")
+def sessions_import(body: dict, x_internal_token: str = Header("")):
+    if not hmac.compare_digest(x_internal_token, INTERNAL_TOKEN):
+        raise HTTPException(403, "bad internal token")
+    return auth.import_data(body or {})
+
+
+@app.post("/internal/cells/{user}/import")
+async def cell_import_via_gateway(user: str, request: Request, x_internal_token: str = Header("")):
+    """Migration: forward an export bundle (home tar + db.sql + meta.json) to the user's cell."""
+    if not hmac.compare_digest(x_internal_token, INTERNAL_TOKEN):
+        raise HTTPException(403, "bad internal token")
+    if not CELLS:
+        raise HTTPException(400, "not a gateway")
+    body = await request.body()
+    cell = await asyncio.to_thread(CELLS.ensure_awake, user)
+    r = await asyncio.to_thread(lambda: httpx.post(CELLS.addr(cell) + "/internal/import", content=body,
+                                                    headers={"X-Cell-Token": cell["token"]}, timeout=600))
+    cell["last_state"] = None   # the cell restarts itself after an import
+    return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+
+
+@app.post("/internal/import")
+async def cell_import(request: Request, x_cell_token: str = Header("")):
+    """Inside a cell: replace this user's home and database with an exported bundle, then restart."""
+    if not CELL_USER or not hmac.compare_digest(x_cell_token, CELL_TOKEN or ""):
+        raise HTTPException(403, "not a cell or bad cell token")
+    body = await request.body()
+    return await asyncio.to_thread(_do_import, body)
+
+
+def _do_import(body: bytes) -> dict:
+    import io, shutil, subprocess, tarfile, tempfile
+    home = pathlib.Path(os.environ.get("SUPERAPP_HOME_ROOT", "~/.superapp/users")).expanduser() / CELL_USER
+    out: dict[str, Any] = {"user": CELL_USER}
+    with tempfile.TemporaryDirectory() as td:
+        with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as tar:
+            tar.extractall(td, filter="data")
+        work = pathlib.Path(td)
+        meta = json.loads((work / "meta.json").read_text()) if (work / "meta.json").exists() else {}
+        r = ROOMS.get(CELL_USER)
+        if r:
+            r.scheduler._stop.set()
+        src = work / "home"
+        if src.exists():
+            for item in src.iterdir():
+                dst = home / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dst, dirs_exist_ok=True, symlinks=True)
+                else:
+                    shutil.copy2(item, dst)
+            out["home_entries"] = len(list(src.iterdir()))
+        if (work / "db.sql").exists():
+            dbname = db._dbname(CELL_USER)
+            admin = "postgresql://superapp@127.0.0.1:5432/postgres"
+            subprocess.run(["psql", admin, "-v", "ON_ERROR_STOP=1", "-c",
+                            f"select pg_terminate_backend(pid) from pg_stat_activity where datname='{dbname}' and pid<>pg_backend_pid()",
+                            "-c", f'drop database if exists "{dbname}"', "-c", f'create database "{dbname}"'], check=True, capture_output=True)
+            res = subprocess.run(["psql", admin.replace("/postgres", f"/{dbname}"), "-q", "-f", str(work / "db.sql")],
+                                 capture_output=True, text=True)
+            out["db_restored"] = res.returncode == 0
+            out["db_errors"] = res.stderr.count("ERROR")
+        if meta.get("vault_key_old"):
+            out["vault_rekeyed"] = vault.rekey(home, meta["vault_key_old"])
+    out["restarting"] = True
+    threading.Timer(1.0, lambda: os._exit(0)).start()   # the gateway boots us fresh on the next request
+    return out
+
+
+@app.get("/internal/cells")
+def cells_list(x_internal_token: str = Header("")):
+    if not hmac.compare_digest(x_internal_token, INTERNAL_TOKEN):
+        raise HTTPException(403, "bad internal token")
+    return {"cells": CELLS.public() if CELLS else []}
 
 
 # ------------------------------------------------------------- user rooms ----
@@ -472,6 +570,13 @@ def _idle_watch():
             continue   # cheaper to stay up than to stop and be woken in a moment
         print(f"cell {CELL_USER}: idle for {IDLE_EXIT_SECS}s, next job "
               f"{'in %ds' % (nxt - time.time()) if nxt else 'none'}; exiting so the machine stops", flush=True)
+        if os.environ.get("SUPERAPP_GATEWAY_URL"):
+            try:
+                import httpx
+                httpx.post(os.environ["SUPERAPP_GATEWAY_URL"].rstrip("/") + "/internal/cells/state", json=cell_state(),
+                           headers={"X-Cell-Token": CELL_TOKEN or ""}, timeout=10)
+            except Exception as e:  # noqa: BLE001
+                print(f"cell {CELL_USER}: could not report state to the gateway: {e}", flush=True)
         os._exit(0)
 
 
@@ -490,6 +595,9 @@ def health():
     out = {"ok": True, "model": CONFIG.model, "users": len(ROOMS), "db": db.enabled()}
     if CELL_USER:
         out["cell"] = cell_state()
+    if CELLS:
+        out["gateway"] = True
+        out["cells"] = len(CELLS.cells)
     return out
 
 
@@ -637,6 +745,8 @@ def post_message(body: dict, user: str = Depends(current_user)):
 # ------------------------------------------------------------- WebSocket ----
 @app.websocket("/v1/ws")
 async def ws_endpoint(ws: WebSocket, token: str = Query("")):
+    if CELLS:
+        return await CELLS.bridge_ws(ws, token)
     user = resolve_token(token)
     if not user:
         await ws.close(code=4401)
