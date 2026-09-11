@@ -16,7 +16,7 @@ primary_region = "ord"
 [env]
   SUPERAPP_CELLS = "fly"
   FLY_CELLS_APP = "muse-cells"
-  FLY_CELLS_IMAGE = "registry.fly.io/muse-cells:v5"
+  FLY_CELLS_IMAGE = "registry.fly.io/muse-cells:v7"
   FLY_CELLS_REGION = "ord"
   FLY_CELLS_MEMORY_MB = "2048"
   FLY_CELLS_VOLUME_GB = "10"

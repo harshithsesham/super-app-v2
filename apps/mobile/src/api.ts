@@ -61,7 +61,7 @@ export class Api {
     return (await res.json()) as T;
   }
   me() {
-    return this.req<{ user: string; assistant: string; model: string; status: string; identity: string; user_md: string }>("/v1/me");
+    return this.req<{ user: string; name?: string; assistant: string; model: string; status: string; identity: string; user_md: string; onboarded?: boolean }>("/v1/me");
   }
   history() { return this.req<{ messages: ChatMessage[] }>("/v1/history"); }
   activity() { return this.req<{ events: ActivityEvent[]; subagents: Subagent[]; status: string }>("/v1/activity"); }
@@ -81,6 +81,9 @@ export class Api {
   hub() { return this.req<Hub>("/v1/hub"); }
   voiceStatus() { return this.req<{ tts: boolean; voice_id: string }>("/v1/voice/status"); }
   stopBrowserTask(id: string) { return this.req<{ task_id: string }>(`/v1/browser/tasks/${id}/stop`, { method: "POST" }); }
+  onboard(body: { name: string; call_them: string; assistant: string; vibe: string; plate: string; timezone: string }) {
+    return this.req<{ ok: boolean; assistant: string; call_them: string; timezone: string }>("/v1/onboarding", { method: "POST", body: JSON.stringify(body) });
+  }
   registerPush(token: string, platform: "ios" | "android", env: "production" | "sandbox") {
     return this.req<{ registered: boolean; devices?: number }>("/v1/push/register", { method: "POST", body: JSON.stringify({ token, platform, env }) });
   }

@@ -26,6 +26,7 @@ HOME = pathlib.Path(os.environ.get("HOME", "~")).expanduser()
 PUBLIC_URL = os.environ.get("SUPERAPP_PUBLIC_URL", "http://localhost:18792").rstrip("/")
 INTERNAL_URL = os.environ.get("SUPERAPP_INTERNAL_URL", "http://127.0.0.1:18792").rstrip("/")
 INTERNAL_TOKEN = os.environ.get("SUPERAPP_INTERNAL_TOKEN", "")
+from .gmail import CALENDAR_SCOPE
 SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 
@@ -208,15 +209,220 @@ def raw_call(pos: list[str], opts: dict):
         out({"status": "error", "http_status": e.status, "message": str(e)}, 1)
 
 
+# ------------------------------------------------------------------ calendar --
+def _user_tz():
+    """The user's zone from USER.md (written at onboarding), else the daemon default."""
+    import zoneinfo
+    name = ""
+    try:
+        for line in (HOME / "USER.md").read_text().splitlines():
+            if line.lower().startswith("timezone:"):
+                name = line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    for cand in (name, os.environ.get("SUPERAPP_TZ", ""), "UTC"):
+        try:
+            if cand:
+                return zoneinfo.ZoneInfo(cand)
+        except Exception:  # noqa: BLE001
+            continue
+    return zoneinfo.ZoneInfo("UTC")
+
+
+def _stamp(value: dict | None) -> dict | None:
+    """RFC3339 dateTime -> {utc, user_local}; all-day dates pass through untouched."""
+    from datetime import datetime, timezone
+    if not value or not value.get("dateTime"):
+        return None
+    try:
+        dt = datetime.fromisoformat(value["dateTime"].replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return {"utc": dt.astimezone(timezone.utc).isoformat(), "user_local": dt.astimezone(_user_tz()).isoformat()}
+
+
+def _enrich_event(ev: dict) -> dict:
+    for key, field in (("start", "event_starts_at"), ("end", "event_ends_at"), ("originalStartTime", "event_original_starts_at")):
+        st = _stamp(ev.get(key))
+        if st:
+            ev[field] = st
+    return ev
+
+
+def calendar_client() -> GmailClient:
+    tok = vault.load("gmail", HOME)
+    if not tok:
+        out({"status": "not_connected", "connect_url": f"{PUBLIC_URL}/v1/gmail/connect?state={sign_state('connect')}",
+             "message": "Google Calendar is not connected yet."}, 2)
+    if CALENDAR_SCOPE not in (tok.get("scopes") or []):
+        out({"status": "not_connected", "scope_status": "not_granted",
+             "scope_add_url": f"{PUBLIC_URL}/v1/gmail/connect?state={sign_state('connect')}",
+             "connect_url": f"{PUBLIC_URL}/v1/gmail/connect?state={sign_state('connect')}",
+             "message": "The connected Google account has not granted calendar access yet."}, 2)
+    return GmailClient(tok, on_refresh=lambda t: vault.store("gmail", t, HOME))
+
+
+def calendar_status(opts: dict):
+    tok = vault.load("gmail", HOME)
+    if not tok:
+        if not configured():
+            out({"status": "not_configured", "message": "The server has no Google OAuth client configured yet."}, 2)
+        out({"status": "not_connected", "connect_url": f"{PUBLIC_URL}/v1/gmail/connect?state={sign_state('connect')}"}, 0)
+    granted = CALENDAR_SCOPE in (tok.get("scopes") or [])
+    res: dict = {"status": "connected" if granted else "not_connected", "email": tok.get("email"), "account_id": "default",
+                 "scope_key": "calendar", "scope_status": "granted" if granted else "not_granted"}
+    if not granted:
+        res["scope_add_url"] = f"{PUBLIC_URL}/v1/gmail/connect?state={sign_state('connect')}"
+        res["connect_url"] = res["scope_add_url"]
+    out(res)
+
+
+def agenda(opts: dict):
+    from datetime import datetime, timedelta, time as dtime
+    c = calendar_client()
+    tz = _user_tz()
+    now = datetime.now(tz)
+    start = datetime.combine(now.date(), dtime.min, tz)
+    if opts.get("week"):
+        days = 7
+    elif opts.get("days"):
+        days = max(1, int(opts["days"]))
+    else:
+        days = 1
+    if opts.get("from"):
+        start = datetime.fromisoformat(str(opts["from"])).astimezone(tz)
+    end = start + timedelta(days=days)
+    cals = c.calendar("GET", "/users/me/calendarList").get("items", [])
+    want = str(opts.get("calendar", "")).strip().lower()
+    if want:
+        cals = [x for x in cals if want in (x.get("summary", "").lower(), x.get("id", "").lower())]
+        if not cals:
+            out({"status": "error", "message": f"no calendar matching {want!r}"}, 1)
+    else:
+        cals = [x for x in cals if x.get("selected", True) and not x.get("hidden")]
+    events = []
+    for cal in cals:
+        page = None
+        while True:
+            params = {"timeMin": start.isoformat(), "timeMax": end.isoformat(), "singleEvents": "true", "orderBy": "startTime", "maxResults": 250}
+            if page:
+                params["pageToken"] = page
+            res = c.calendar("GET", f"/calendars/{urllib.parse.quote(cal['id'], safe='')}/events", params)
+            for ev in res.get("items", []):
+                if ev.get("status") == "cancelled":
+                    continue
+                _enrich_event(ev)
+                events.append({"id": ev.get("id"), "calendar": cal.get("summary"), "calendar_id": cal.get("id"), "summary": ev.get("summary", "(no title)"),
+                               "start": ev.get("start"), "end": ev.get("end"), "event_starts_at": ev.get("event_starts_at"),
+                               "event_ends_at": ev.get("event_ends_at"), "all_day": bool(ev.get("start", {}).get("date")),
+                               "location": ev.get("location"), "attendees": len(ev.get("attendees") or []),
+                               "organizer": (ev.get("organizer") or {}).get("email"), "hangoutLink": ev.get("hangoutLink"),
+                               "description": (ev.get("description") or "")[:300]})
+            page = res.get("nextPageToken")
+            if not page:
+                break
+    events.sort(key=lambda e: (e["start"].get("dateTime") or e["start"].get("date") or ""))
+    out({"window": {"from": start.isoformat(), "to": end.isoformat(), "timezone": str(tz)}, "calendars": [x.get("summary") for x in cals],
+         "count": len(events), "events": events})
+
+
+CAL_WRITE = {"insert", "patch", "update", "delete", "move", "quickAdd", "import", "clear"}
+
+
+def calendar_raw(pos: list[str], opts: dict):
+    """<resource> <method> --params JSON [--json JSON] -> one Calendar API v3 call."""
+    c = calendar_client()
+    if len(pos) < 2:
+        out({"status": "error", "message": "expected: <resource> <method>, e.g. events list"}, 1)
+    resource, method = pos[0], pos[1]
+    params = json.loads(str(opts.get("params", "{}")))
+    body = json.loads(str(opts["json"])) if opts.get("json") else None
+    cal_id = urllib.parse.quote(str(params.pop("calendarId", "primary")), safe="")
+    ev_id = params.pop("eventId", None)
+    http = {"list": "GET", "get": "GET", "instances": "GET", "insert": "POST", "quickAdd": "POST", "move": "POST", "import": "POST",
+            "query": "POST", "patch": "PATCH", "update": "PUT", "delete": "DELETE", "clear": "POST", "watch": "POST"}.get(method, "POST")
+    if resource == "events":
+        path = f"/calendars/{cal_id}/events"
+        if method == "instances":
+            path += f"/{ev_id}/instances"
+        elif method == "move":
+            path += f"/{ev_id}/move"
+        elif method == "quickAdd":
+            path += "/quickAdd"
+        elif method == "import":
+            path += "/import"
+        elif method in ("get", "patch", "update", "delete"):
+            if not ev_id:
+                out({"status": "error", "message": "eventId is required in --params"}, 1)
+            path += f"/{ev_id}"
+    elif resource == "calendarList":
+        path = "/users/me/calendarList" + (f"/{cal_id}" if method in ("get", "patch", "update", "delete") else "")
+    elif resource == "calendars":
+        path = "/calendars" + ("" if method == "insert" else f"/{cal_id}") + ("/clear" if method == "clear" else "")
+    elif resource == "freebusy":
+        path, http = "/freeBusy", "POST"
+    elif resource == "colors":
+        path, http = "/colors", "GET"
+    elif resource == "settings":
+        path = "/users/me/settings" + (f"/{params.pop('setting', '')}" if method == "get" else "")
+    elif resource == "acl":
+        path = f"/calendars/{cal_id}/acl" + (f"/{params.pop('ruleId', '')}" if method in ("get", "patch", "update", "delete") else "")
+    else:
+        out({"status": "error", "message": f"unknown resource {resource}"}, 1)
+    outward = method in CAL_WRITE and (bool((body or {}).get("attendees")) or params.get("sendUpdates") not in (None, "none") or resource == "acl")
+    if outward:
+        approve(f"calendar_{method}", f"Calendar · {method} {resource}", "This change reaches other people (guests are notified or access changes).",
+                [{"label": "Method", "value": f"calendar.{resource}.{method}"}, {"label": "Params", "value": json.dumps(params)[:600]},
+                 {"label": "Body", "value": json.dumps(body)[:1200] if body else "(none)"}])
+    try:
+        res = c.calendar(http, path, params, body)
+    except GmailError as e:
+        out({"status": "error", "http_status": e.status, "message": str(e)}, 1)
+    if isinstance(res, dict):
+        if "items" in res and resource == "events":
+            res["items"] = [_enrich_event(ev) for ev in res["items"]]
+        elif resource == "events":
+            _enrich_event(res)
+    out(res if isinstance(res, dict) else {"result": res})
+
+
+def calendar_main(argv: list[str]):
+    pos, opts = parse_args(argv)
+    if not pos or opts.get("help") or "--help" in argv:
+        out({"commands": ["status [--for-command X]", "accounts", "disconnect", "+agenda [--today|--week|--days N] [--calendar name] [--from ISO]",
+                          "<resource> <method> --params JSON [--json JSON]  (events, calendarList, calendars, freebusy, colors, settings, acl)"]})
+    cmd = pos[0]
+    try:
+        if cmd == "status":
+            calendar_status(opts)
+        elif cmd == "accounts":
+            tok = vault.load("gmail", HOME)
+            out({"accounts": [{"account_id": "default", "email": tok.get("email"), "display_name": tok.get("email")}] if tok else []})
+        elif cmd == "disconnect":
+            out({"disconnect_url": f"{PUBLIC_URL}/v1/gmail/disconnect?state={sign_state('disconnect')}"})
+        elif cmd == "+agenda":
+            agenda(opts)
+        else:
+            calendar_raw(pos, opts)
+    except GmailError as e:
+        out({"status": "error", "http_status": e.status, "message": str(e)}, 1)
+
+
 def main(argv: list[str] | None = None):
     argv = sys.argv[1:] if argv is None else argv
     if not argv or argv[0] in ("--help", "-h"):
         out({"usage": __doc__})
     if argv[0] == "schema":
-        out({"method": argv[1] if len(argv) > 1 else "", "note": "Pass Gmail API parameters in --params as JSON and a request body in --json. "
+        m = argv[1] if len(argv) > 1 else ""
+        if m.startswith("calendar"):
+            out({"method": m, "note": "Calendar API v3: pass calendarId/eventId and query parameters in --params as JSON, the event body in --json. "
+                 "Timed events use start/end {dateTime: RFC3339 with offset}; all-day use {date: YYYY-MM-DD}."})
+        out({"method": m, "note": "Pass Gmail API parameters in --params as JSON and a request body in --json. "
              "Resources: messages, threads, labels, drafts, settings. Methods follow the Gmail REST API."})
+    if argv[0] == "calendar":
+        calendar_main(argv[1:])
     if argv[0] != "gmail":
-        out({"status": "error", "message": f"unknown service {argv[0]}; only gmail is available"}, 1)
+        out({"status": "error", "message": f"unknown service {argv[0]}; gmail and calendar are available"}, 1)
     pos, opts = parse_args(argv[1:])
     if not pos or opts.get("help") or "--help" in argv:
         out({"commands": ["status", "accounts", "disconnect", "+triage", "+read", "+send", "+reply", "+draft",

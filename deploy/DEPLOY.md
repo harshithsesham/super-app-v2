@@ -30,7 +30,9 @@ SUPERAPP_TZ=America/Chicago
 `SUPERAPP_GOOGLE_CLIENT_ID/SECRET`, `SUPERAPP_VAULT_KEY`, and `SUPERAPP_DB_PASSWORD` come from `/opt/super-app/.env`.
 Persistence uses the stack's Postgres (`SUPERAPP_DB_HOST=db` by default): the daemon creates one database per user,
 `muse_<user>`, and applies `db/schema.sql` on first use. Set `DATABASE_URL` instead to point elsewhere.
-Add both redirect URIs above to the OAuth client in Google Cloud (Gmail connect and app sign-in).
+Add both redirect URIs above to the OAuth client in Google Cloud (Gmail connect and app sign-in). Enable the **Gmail API** and the
+**Google Calendar API** on the project: one consent grants both (`SUPERAPP_GOOGLE_SERVICES=gmail,calendar`); a user who connected before
+Calendar existed reconnects once to add the scope.
 
 ## 3. Caddy route
 

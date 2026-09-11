@@ -8,8 +8,9 @@ import { BackIcon } from "../ui/Icons";
 import { C, R } from "../theme";
 import type { Api, Connector, Skill } from "../api";
 
-// Providers with a real connect flow in the daemon today.
-const LIVE: Record<string, "gmail"> = { gmail: "gmail" };
+// Providers with a real connect flow in the daemon today. Gmail and Google Calendar
+// share one Google sign-in; connecting either runs the same consent.
+const LIVE: Record<string, string> = { gmail: "gmail", "google-calendar": "google_calendar" };
 
 const PRETTY: Record<string, string> = {
   gmail: "Gmail", "google-calendar": "Google Calendar", "google-contacts": "Google Contacts", "google-drive": "Google Drive",
@@ -44,7 +45,7 @@ export function ConnectorsScreen({ api, onBack }: { api: Api; onBack: () => void
     setBusy(true);
     try {
       const { auth_url } = await api.gmailAuthUrl();
-      const res = await WebBrowser.openAuthSessionAsync(auth_url, "superapp://gmail-connected");
+      const res = await WebBrowser.openAuthSessionAsync(auth_url, "superapp://gmail-connected");   // one consent covers Gmail + Calendar
       if (res.type !== "success" && res.type !== "cancel" && res.type !== "dismiss") throw new Error("Sign-in did not complete");
       await load();
     } catch (e) {

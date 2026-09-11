@@ -21,12 +21,17 @@ def _frontmatter(p: pathlib.Path) -> dict:
 
 
 # skill directory -> vault provider whose presence means "connected"
-PROVIDER_FOR_SKILL = {"gmail": "gmail"}
+PROVIDER_FOR_SKILL = {"gmail": "gmail", "google-calendar": "google_calendar"}
 
 
 def catalog(home: pathlib.Path | None = None) -> list[dict]:
     from ..connectors import vault
     connected = set(vault.providers(home or CONFIG.home))
+    if "gmail" in connected:   # Calendar shares the Google sign-in and counts as connected once its scope is granted
+        from ..connectors.gmail import CALENDAR_SCOPE
+        tok = vault.load("gmail", home or CONFIG.home) or {}
+        if CALENDAR_SCOPE in (tok.get("scopes") or []):
+            connected.add("google_calendar")
     statuses = {k.replace("_", "-"): ("connected" if PROVIDER_FOR_SKILL.get(k.replace("_", "-")) in connected else "available")
                 for k, v in (CONFIG.skills_yaml.get("entries") or {}).items()}
     out = []

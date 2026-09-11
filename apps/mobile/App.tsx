@@ -24,6 +24,7 @@ import { ApprovalCard } from "./src/ui/ApprovalCard";
 import { BrowserCard } from "./src/ui/BrowserCard";
 import { SignInScreen } from "./src/screens/SignInScreen";
 import { registerForPush, useNotificationTaps } from "./src/push";
+import { OnboardingScreen } from "./src/screens/OnboardingScreen";
 import { HubScreen } from "./src/screens/HubScreen";
 import { ChatScreen, describe, statusTitle, type LiveTurn } from "./src/screens/ChatScreen";
 import { IdeasScreen } from "./src/screens/IdeasScreen";
@@ -89,6 +90,8 @@ function App() {
   const [speak, setSpeak] = useState<{ seq: number; text: string } | null>(null);
   const [canSpeak, setCanSpeak] = useState(false);
   const [keyboard, setKeyboard] = useState(false);
+  const [onboarding, setOnboarding] = useState<"unknown" | "needed" | "done">("unknown");
+  const [signinName, setSigninName] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const socket = useRef<AgentSocket | null>(null);
@@ -175,6 +178,7 @@ function App() {
     if (connection !== "open" || !api) return;
     api.approvals().then((r) => setApprovals(r.approvals)).catch(() => {});
     api.voiceStatus().then((v) => setCanSpeak(v.tts)).catch(() => setCanSpeak(false));
+    api.me().then((m) => { setSigninName(m.name ?? ""); setOnboarding(m.onboarded === false ? "needed" : "done"); }).catch(() => setOnboarding("done"));
   }, [connection, api]);
 
   useEffect(() => {
@@ -209,6 +213,10 @@ function App() {
   }
   if (auth === "signin" || !session || !api) {
     return <SignInScreen defaultUrl={extra.apiUrl ?? ""} defaultToken={extra.apiToken} onSignedIn={(s) => { setSession(s); setAuth("ready"); }} />;
+  }
+
+  if (onboarding === "needed" && api) {
+    return <OnboardingScreen api={api} defaultName={signinName} onDone={(a) => { setAssistant(a); setOnboarding("done"); setTab("chat"); }} />;
   }
 
   if (page === "connectors") return <SafeAreaView style={s.root} edges={["top"]}><Stars /><StatusBar style="light" /><ConnectorsScreen api={api} onBack={() => setPage(null)} /></SafeAreaView>;

@@ -24,7 +24,18 @@ SCOPES_BY_TIER = {
     "modify": ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send",
                "https://www.googleapis.com/auth/gmail.modify"],
 }
+CALENDAR = os.environ.get("SUPERAPP_CALENDAR_API_BASE", "https://www.googleapis.com/calendar/v3")   # override for tests
+CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar"
+# Which Google services one connect asks consent for. Calendar rides on the same account as Gmail.
+SERVICES = [x.strip() for x in os.environ.get("SUPERAPP_GOOGLE_SERVICES", "gmail,calendar").split(",") if x.strip()]
 MAX_BODY_CHARS = 12000
+
+
+def wanted_scopes(tier: str) -> list[str]:
+    scopes = list(SCOPES_BY_TIER[tier])
+    if "calendar" in SERVICES:
+        scopes.append(CALENDAR_SCOPE)
+    return scopes
 
 
 def configured() -> bool:
@@ -62,8 +73,8 @@ class GmailClient:
     def auth_url(self, state: str) -> str:
         params = httpx.QueryParams({
             "client_id": self.client_id, "redirect_uri": self.redirect_uri, "response_type": "code",
-            "scope": " ".join(SCOPES_BY_TIER[self.tier]), "state": state,
-            "access_type": "offline", "prompt": "consent"})
+            "scope": " ".join(wanted_scopes(self.tier)), "state": state,
+            "access_type": "offline", "prompt": "consent", "include_granted_scopes": "true"})
         return f"{AUTH_URL}?{params}"
 
     def exchange_code(self, code: str) -> dict:
@@ -90,8 +101,8 @@ class GmailClient:
         return self.token["access_token"]
 
     # -------------------------------------------------------------- raw api --
-    def api(self, method: str, path: str, params: dict | None = None, json: dict | None = None) -> dict:
-        resp = httpx.request(method, f"{GMAIL}{path}", params=params or None, json=json, timeout=30,
+    def api(self, method: str, path: str, params: dict | None = None, json: dict | None = None, base: str = GMAIL) -> dict:
+        resp = httpx.request(method, f"{base}{path}", params=params or None, json=json, timeout=30,
                              headers={"Authorization": f"Bearer {self._access_token()}"})
         if resp.status_code >= 400:
             try:
@@ -100,6 +111,9 @@ class GmailClient:
                 msg = resp.text
             raise GmailError(resp.status_code, msg)
         return resp.json() if resp.content else {}
+
+    def calendar(self, method: str, path: str, params: dict | None = None, json: dict | None = None) -> dict:
+        return self.api(method, path, params, json, base=CALENDAR)
 
     # ------------------------------------------------------------- helpers --
     def profile(self) -> dict:

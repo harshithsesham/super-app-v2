@@ -31,6 +31,13 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         p = self.path.split("?")[0]
+        if p.endswith("/users/me/calendarList"):
+            return self._json({"items": [{"id": "primary", "summary": "Harsh", "selected": True, "primary": True},
+                                         {"id": "work@group.calendar.google.com", "summary": "Work", "selected": True}]})
+        if "/calendars/" in p and p.endswith("/events"):
+            return self._json({"items": EVENTS})
+        if "/calendars/" in p and "/events/" in p:
+            return self._json(EVENTS[0])
         if p.endswith("/profile"): return self._json({"emailAddress": "me@example.com", "historyId": "1"})
         if p.endswith("/messages"): return self._json({"messages": [{"id": "m1", "threadId": "t1"}], "resultSizeEstimate": 1})
         if p.endswith("/messages/m1"): return self._json(MSG)
@@ -40,11 +47,21 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0)); body = json.loads(self.rfile.read(n) or b"{}")
+        if "/calendars/" in self.path and self.path.split("?")[0].endswith("/events"):
+            ev = dict(body, id=f"ev{len(EVENTS) + 1}", status="confirmed"); EVENTS.append(ev)
+            sys.stderr.write("fake-calendar CREATED %s\n" % json.dumps(body)[:200]); return self._json(ev)
+        if self.path.split("?")[0].endswith("/freeBusy"):
+            return self._json({"calendars": {"primary": {"busy": [{"start": EVENTS[0]["start"]["dateTime"], "end": EVENTS[0]["end"]["dateTime"]}]}}})
         if self.path.endswith("/messages/send"):
             SENT.append(body); sys.stderr.write("fake-gmail SENT %s\n" % json.dumps(body)[:200])
             return self._json({"id": f"sent{len(SENT)}", "threadId": body.get("threadId", "t2")})
         if "/modify" in self.path: return self._json({"id": "m1", "labelIds": ["INBOX"]})
         return self._json({"error": {"message": "unsupported"}}, 400)
+
+
+EVENTS = [{"id": "ev1", "status": "confirmed", "summary": "Dentist", "location": "12 Main St",
+           "start": {"dateTime": "2026-09-11T14:00:00-05:00"}, "end": {"dateTime": "2026-09-11T15:00:00-05:00"},
+           "organizer": {"email": "me@example.com"}}]
 
 
 if __name__ == "__main__":

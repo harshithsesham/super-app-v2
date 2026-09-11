@@ -12,7 +12,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.harshith.superapp",
       "appleTeamId": "JAUSPN67UY",
-      "buildNumber": "62",
+      "buildNumber": "64",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [

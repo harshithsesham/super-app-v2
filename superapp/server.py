@@ -36,7 +36,7 @@ from .approvals import Approval, ApprovalStore
 from .scheduler import tools as scheduler_tools  # noqa: F401  registers cron.*, hooks.*, muse.nothing_to_do
 from .scheduler.engine import Engine
 from .connectors import vault
-from .connectors.gmail import GmailClient, configured as gmail_configured
+from .connectors.gmail import CALENDAR_SCOPE, GmailClient, configured as gmail_configured
 from .cells import gateway
 
 app = FastAPI(title="superapp daemon", version="0.1.0")
@@ -530,11 +530,19 @@ def _connect_state(r: Room) -> str:
 
 @app.get("/v1/connectors")
 def connectors(user: str = Depends(current_user)):
+    """Live connectors. Gmail and Google Calendar share one Google sign-in; Calendar shows as connected
+    once that account has granted the calendar scope (an older Gmail-only consent can be re-run to add it)."""
     r = room_for(user)
-    have = set(vault.providers(r.home))
-    return {"connectors": [{"provider": "gmail", "status": "connected" if "gmail" in have else "available",
-                            "configured": gmail_configured(),
-                            "email": (vault.load("gmail", r.home) or {}).get("email") if "gmail" in have else None}]}
+    tok = vault.load("gmail", r.home) or {}
+    have_gmail = bool(tok)
+    have_cal = have_gmail and CALENDAR_SCOPE in (tok.get("scopes") or [])
+    return {"connectors": [
+        {"provider": "gmail", "status": "connected" if have_gmail else "available", "configured": gmail_configured(),
+         "email": tok.get("email") if have_gmail else None},
+        {"provider": "google_calendar", "status": "connected" if have_cal else "available", "configured": gmail_configured(),
+         "email": tok.get("email") if have_cal else None, "connect_via": "gmail",
+         "note": None if have_cal or not have_gmail else "Reconnect Google to add calendar access."},
+    ]}
 
 
 @app.get("/v1/gmail/auth-url")
@@ -563,7 +571,9 @@ def gmail_callback(code: str = "", state: str = "", error: str = ""):
     token = c.exchange_code(code)
     token["email"] = c.profile().get("emailAddress")
     vault.store("gmail", token, r.home)
-    r.agent.deliver(f"[Connector] Gmail connected for {token['email']}. The `gmail` skill is now available.")
+    services = ["Gmail"] + (["Google Calendar"] if CALENDAR_SCOPE in (token.get("scopes") or []) else [])
+    r.agent.deliver(f"[Connector] {' and '.join(services)} connected for {token['email']}. "
+                    f"The `gmail`{' and `google_calendar`' if len(services) > 1 else ''} skill{'s are' if len(services) > 1 else ' is'} now available.")
     return HTMLResponse(f"""<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
 <body style='font-family:-apple-system,sans-serif;background:#F4F5F7;color:#111318;display:flex;flex-direction:column;
 align-items:center;justify-content:center;height:100vh;margin:0;gap:12px'>
@@ -661,13 +671,71 @@ def scheduler_state(user: str = Depends(current_user)):
             "hooks": list(r.scheduler.hooks.values()), "runs": r.store.runs(None, 20) if r.store else []}
 
 
+def _field(text: str, key: str) -> str:
+    for line in text.splitlines():
+        if line.lower().startswith(key + ":"):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
+def _set_fields(text: str, values: dict[str, str]) -> str:
+    """Fill `key: value` lines in a standing file, keeping everything else as it is."""
+    out, seen = [], set()
+    for line in text.splitlines():
+        key = line.split(":", 1)[0].strip().lower() if ":" in line and not line.startswith("#") else None
+        if key in values:
+            out.append(f"{key}: {values[key]}")
+            seen.add(key)
+        else:
+            out.append(line)
+    for key, val in values.items():
+        if key not in seen:
+            out.append(f"{key}: {val}")
+    return "\n".join(out).rstrip("\n") + "\n"
+
+
+def onboarded(r: Room) -> bool:
+    return bool(_field(r.memory.read("USER.md"), "name"))
+
+
 @app.get("/v1/me")
 def me(user: str = Depends(current_user)):
     r = room_for(user)
     rec = auth.user_record(user)
     return {"user": user, "name": rec.get("name", ""), "email": rec.get("email"), "assistant": r.agent.assistant_name(),
             "model": CONFIG.model, "status": r.agent.status, "identity": r.memory.read("IDENTITY.md"),
-            "user_md": r.memory.read("USER.md"), "google_signin": auth.configured()}
+            "user_md": r.memory.read("USER.md"), "google_signin": auth.configured(), "onboarded": onboarded(r)}
+
+
+@app.post("/v1/onboarding")
+def onboarding(body: dict, user: str = Depends(current_user)):
+    """First-run setup from the app: who the user is, what to call the agent, what is on their plate.
+    Writes the standing files, then hands the agent an opening so it greets in its own voice."""
+    import zoneinfo
+    r = room_for(user)
+    b = {k: str((body or {}).get(k, "")).strip()[:200] for k in ("name", "call_them", "assistant", "vibe", "timezone")}
+    plate = str((body or {}).get("plate", "")).strip()[:2000]
+    if not b["name"]:
+        raise HTTPException(400, "name required")
+    call = b["call_them"] or b["name"].split()[0]
+    assistant = b["assistant"] or "Muse"
+    vibe = b["vibe"] or "warm and direct"
+    tz = b["timezone"]
+    try:
+        zoneinfo.ZoneInfo(tz)
+    except Exception:  # noqa: BLE001
+        tz = r.agent.tz
+    r.agent.tz = tz
+    (r.home / "USER.md").write_text(_set_fields(r.memory.read("USER.md"), {"name": b["name"], "call_them": call, "timezone": tz}))
+    (r.home / "IDENTITY.md").write_text(_set_fields(r.memory.read("IDENTITY.md"), {"name": assistant, "vibe": vibe}))
+    r.memory.append_daily(f"Onboarding: user {b['name']} (call them {call}), agent named {assistant}, vibe {vibe}, timezone {tz}."
+                          + (f" On their plate: {plate}" if plate else ""))
+    r._deliver(f"[Onboarding complete] {b['name']} just finished setup and is looking at the chat. Call them {call}. "
+               f"They named you {assistant} and asked for a {vibe} vibe; USER.md and IDENTITY.md are already written. "
+               + (f"What is on their plate right now, in their words: {plate!r}. " if plate else "They did not say what is on their plate yet. ")
+               + "Greet them in two or three sentences in your own voice, reflect back the one thing that matters most from what they said, "
+               "and name the first concrete thing you will do. If something durable came up, record it in MEMORY.md. No lists, no headings.")
+    return {"ok": True, "assistant": assistant, "call_them": call, "timezone": tz}
 
 
 @app.get("/v1/history")
