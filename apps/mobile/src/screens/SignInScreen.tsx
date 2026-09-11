@@ -1,6 +1,6 @@
 // Sign in with Google, as the previous build did: the daemon runs the OAuth
 // dance and bounces back through superapp://signed-in with a session token.
-// A hidden "Choose server" toggle keeps dev builds pointable at localhost,
+// In development builds only, a "Choose server" toggle keeps the app pointable at localhost,
 // where a pasted token still works.
 import React, { useCallback, useState } from "react";
 import { StyleSheet, Text, TextInput, View } from "react-native";
@@ -72,18 +72,22 @@ export function SignInScreen({ defaultUrl, defaultToken, onSignedIn }: {
         <Pressable style={s.btn} feel="control" onPress={google} disabled={busy}>
           <Text style={s.btnText}>{busy ? "Signing in…" : "Continue with Google"}</Text>
         </Pressable>
-        <Pressable onPress={() => setAdvanced((v) => !v)} feel="control">
-          <Text style={s.advanced}>{advanced ? "Hide server" : "Choose server"}</Text>
-        </Pressable>
-        {advanced ? (
+        {__DEV__ ? (
           <>
-            <TextInput style={s.input} value={url} onChangeText={setUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url"
-              placeholder="https://your-server" placeholderTextColor={C.muted} />
-            <TextInput style={s.input} value={token} onChangeText={setToken} autoCapitalize="none" autoCorrect={false} secureTextEntry
-              placeholder="Access token (dev)" placeholderTextColor={C.muted} />
-            <Pressable style={s.btnSecondary} feel="control" onPress={withToken} disabled={busy}>
-              <Text style={s.btnSecondaryText}>Continue with token</Text>
+            <Pressable onPress={() => setAdvanced((v) => !v)} feel="control">
+              <Text style={s.advanced}>{advanced ? "Hide server" : "Choose server (dev)"}</Text>
             </Pressable>
+            {advanced ? (
+              <>
+                <TextInput style={s.input} value={url} onChangeText={setUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url"
+                  placeholder="https://your-server" placeholderTextColor={C.muted} />
+                <TextInput style={s.input} value={token} onChangeText={setToken} autoCapitalize="none" autoCorrect={false} secureTextEntry
+                  placeholder="Access token (dev)" placeholderTextColor={C.muted} />
+                <Pressable style={s.btnSecondary} feel="control" onPress={withToken} disabled={busy}>
+                  <Text style={s.btnSecondaryText}>Continue with token</Text>
+                </Pressable>
+              </>
+            ) : null}
           </>
         ) : null}
       </View>

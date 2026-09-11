@@ -1,30 +1,23 @@
-// The agent's avatar: a soft beige figure with a small face, sized to fit the
-// chat header or a list row. The real app renders a 3D character; this is
-// the placeholder until avatar generation lands.
+// The agent's avatar: the Neo orb from the voice dock, a lavender sphere with a
+// soft glow, sized to fit the chat header, the sign-in screen, or a list row.
 import React from "react";
 import { StyleSheet, View } from "react-native";
-import { C } from "../theme";
+import { LinearGradient } from "expo-linear-gradient";
+
+export const ORB_COLORS = ["#DCD2FF", "#8F7CFF", "#4B3AA8"] as const;
 
 export function Avatar({ size = 64 }: { size?: number }) {
-  const eye = Math.max(3, size * 0.06);
+  const r = size / 2;
   return (
-    <View style={[s.wrap, { width: size, height: size * 1.05, borderRadius: size / 2 }]}>
-      <View style={[s.hood, { width: size * 0.62, height: size * 0.62, borderRadius: size * 0.31, top: size * 0.1 }]} />
-      <View style={[s.face, { width: size * 0.46, height: size * 0.4, borderRadius: size * 0.2, top: size * 0.2 }]}>
-        <View style={[s.eyes, { gap: size * 0.14, marginTop: size * 0.12 }]}>
-          <View style={{ width: eye, height: eye, borderRadius: eye, backgroundColor: C.text }} />
-          <View style={{ width: eye, height: eye, borderRadius: eye, backgroundColor: C.text }} />
-        </View>
-        <View style={[s.smile, { width: size * 0.1, height: size * 0.05, borderRadius: size * 0.05, marginTop: size * 0.05 }]} />
-      </View>
+    <View style={[s.wrap, { width: size, height: size, borderRadius: r, shadowRadius: size * 0.32 }]}>
+      <LinearGradient colors={[...ORB_COLORS]} start={{ x: 0.2, y: 0.1 }} end={{ x: 0.9, y: 1 }}
+        style={{ width: size, height: size, borderRadius: r, borderWidth: 1, borderColor: "rgba(199,184,255,0.4)" }} />
+      <View style={[s.highlight, { width: size * 0.34, height: size * 0.22, borderRadius: size * 0.17, top: size * 0.14, left: size * 0.2 }]} />
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  wrap: { backgroundColor: C.avatar, alignItems: "center", overflow: "hidden" },
-  hood: { position: "absolute", backgroundColor: C.avatarShade },
-  face: { position: "absolute", backgroundColor: "#F6EEE4", alignItems: "center" },
-  eyes: { flexDirection: "row" },
-  smile: { borderBottomWidth: 2, borderColor: C.text, borderRadius: 8 },
+  wrap: { shadowColor: "#9F8CFF", shadowOpacity: 0.9, shadowOffset: { width: 0, height: 0 }, elevation: 8 },
+  highlight: { position: "absolute", backgroundColor: "rgba(255,255,255,0.28)" },
 });
