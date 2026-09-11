@@ -167,3 +167,12 @@ then the last 3 days on every foreground plus any ranges the agent queued with `
 push asking the user to open the app). Data lives under `<home>/.device/health/healthkit/` as JSON lines; the cell's
 `/v1/health/sync`, `/v1/health/status`, `/v1/health/requests` serve the app. The App ID needs the HealthKit capability
 (automatic signing adds it with the entitlement from the config plugin).
+
+## Secure Store
+
+Site logins and API keys live in `<home>/.vault/credentials/*.enc`, Fernet-encrypted with the cell's key at `/data/vault.key`
+(generated on first boot; cells created before this adopted the key from their env once). The gateway no longer stores or
+passes vault keys. The agent requests a card (`credentials.request_login` etc.), the app opens the signed entry page
+`/v1/credentials/entry?state=…` (routed to the right cell by the state, like Gmail connect), and the value goes straight
+into the vault. The browser worker signs in with the `fill_credential` automation action; it never sees the value and
+page snapshots mask password fields and scrub anything it typed from the Secure Store.

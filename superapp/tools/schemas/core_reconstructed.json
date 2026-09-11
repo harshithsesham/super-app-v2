@@ -1,84 +1,606 @@
 [
-  {"tool": {"namespace": "muse", "description": "Core runtime tools: shell, files, memory, todo.", "functions": [
-    {"name": "exec", "description": "Run a shell command on your computer. Use background=true for anything longer than a few seconds; its terminal result is delivered to you automatically when it finishes, so never poll for it.",
-     "parameters": {"type": "object", "properties": {
-       "command": {"type": "string", "description": "The shell command to run."},
-       "workdir": {"type": "string", "description": "Working directory. Defaults to ~."},
-       "timeout_s": {"type": "integer", "description": "Seconds before the command is killed. Default 60 foreground, 1800 background."},
-       "background": {"type": "boolean", "description": "Return immediately with a session_id; the result arrives later."}},
-      "required": ["command"], "additionalProperties": false}},
-    {"name": "read", "description": "Read a text file with paging. Paths resolve relative to ~.",
-     "parameters": {"type": "object", "properties": {
-       "path": {"type": "string"}, "offset": {"type": "integer", "description": "1-based first line."}, "limit": {"type": "integer", "description": "Max lines, default 200."}},
-      "required": ["path"], "additionalProperties": false}},
-    {"name": "write", "description": "Create or overwrite a text file. Parent directories are created.",
-     "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
-      "required": ["path", "content"], "additionalProperties": false}},
-    {"name": "edit", "description": "Replace an exact string in a file once. The old string must match exactly and be unique.",
-     "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"}},
-      "required": ["path", "old", "new"], "additionalProperties": false}},
-    {"name": "memory_search", "description": "Semantic search over MEMORY.md and ~/memory/*.md. Returns top snippets with path and line citations like MEMORY.md#L7. Use before answering anything about prior work, dates, people, preferences, or history.",
-     "parameters": {"type": "object", "properties": {
-       "queries": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 3, "description": "1 to 3 phrasings; queries[0] closest to the user's wording."},
-       "maxResults": {"type": "integer", "default": 8},
-       "minScore": {"type": "number", "minimum": 0, "maximum": 1}},
-      "required": ["queries"], "additionalProperties": false}},
-    {"name": "memory_get", "description": "Read lines from a memory file cited by memory_search.",
-     "parameters": {"type": "object", "properties": {
-       "path": {"type": "string", "description": "Memory-relative path, e.g. MEMORY.md or memory/2026-09-10.md"},
-       "from": {"type": "integer", "description": "1-based first line."}, "lines": {"type": "integer", "description": "How many lines, default 40."}},
-      "required": ["path"], "additionalProperties": false}},
-    {"name": "memory_explain", "description": "Provenance for one memory claim: who said it, the quote, when first learned and last reinforced, current confidence, the earlier claims it replaced and the later ones that replaced it.",
-     "parameters": {"type": "object", "properties": {
-       "ref": {"type": "string", "description": "A claim id, a memory:// URI, or a citation like memory/2026-09-09.md#L7"}},
-      "required": ["ref"], "additionalProperties": false}}
-  ]}},
-  {"tool": {"namespace": "process", "description": "Manage background shell sessions started with muse.exec background=true.", "functions": [
-    {"name": "list", "description": "List background sessions with status.", "parameters": {"type": "object", "properties": {}, "additionalProperties": false}},
-    {"name": "log", "description": "Read recent output of a session.", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "tail": {"type": "integer", "default": 200}}, "required": ["session_id"], "additionalProperties": false}},
-    {"name": "poll", "description": "Check whether a session has finished and get its exit code.", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}}, "required": ["session_id"], "additionalProperties": false}},
-    {"name": "kill", "description": "Terminate a session.", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}}, "required": ["session_id"], "additionalProperties": false}},
-    {"name": "write", "description": "Write to a session's stdin.", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "data": {"type": "string"}}, "required": ["session_id", "data"], "additionalProperties": false}},
-    {"name": "send_keys", "description": "Send key presses to an interactive session (e.g. 'Enter', 'C-c').", "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "keys": {"type": "array", "items": {"type": "string"}}}, "required": ["session_id", "keys"], "additionalProperties": false}}
-  ]}},
-  {"tool": {"namespace": "subagent", "description": "Delegate self-contained work to child agents that run in the background. Children start with no inherited transcript, so brief them fully. Results are delivered to you automatically; never poll.", "functions": [
-    {"name": "spawn", "description": "Start a subagent on a task. Returns a spawn_id immediately.",
-     "parameters": {"type": "object", "properties": {
-       "message": {"type": "string", "description": "The complete brief: goal, context, constraints, what to report back."},
-       "items": {"type": "array", "description": "Optional multimodal items (text, image paths) in place of message.", "items": {"type": "object"}},
-       "label": {"type": "string", "description": "Short human-readable label shown in the activity feed."},
-       "timeout_s": {"type": "integer", "default": 1800}},
-      "additionalProperties": false}},
-    {"name": "list", "description": "List subagents with status: running, done, interrupted, failed.", "parameters": {"type": "object", "properties": {}, "additionalProperties": false}},
-    {"name": "send", "description": "Send a follow-up message to a running subagent.",
-     "parameters": {"type": "object", "properties": {"spawn_id": {"type": "string"}, "message": {"type": "string"}, "interrupt": {"type": "boolean", "default": false}}, "required": ["spawn_id", "message"], "additionalProperties": false}},
-    {"name": "resume", "description": "Restart an interrupted subagent from where it stopped.", "parameters": {"type": "object", "properties": {"spawn_id": {"type": "string"}}, "required": ["spawn_id"], "additionalProperties": false}},
-    {"name": "close", "description": "Stop a subagent and discard it.", "parameters": {"type": "object", "properties": {"spawn_id": {"type": "string"}}, "required": ["spawn_id"], "additionalProperties": false}}
-  ]}},
-  {"tool": {"namespace": "browser", "description": "Your real Chromium. spawn_task starts an isolated browser worker on a natural-language task; steer_task continues one. search and open are fast read-only lookups.", "functions": [
-    {"name": "search", "description": "Web search for public information. Returns results with titles, URLs, and snippets you can cite.",
-     "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "max_results": {"type": "integer", "default": 8}}, "required": ["query"], "additionalProperties": false}},
-    {"name": "open", "description": "Fetch a page read-only and return its readable text with line numbers for citation.",
-     "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"], "additionalProperties": false}},
-    {"name": "lookup_citation_url", "description": "Resolve a citation marker from search or open results back to its exact URL.",
-     "parameters": {"type": "object", "properties": {"citation": {"type": "string"}}, "required": ["citation"], "additionalProperties": false}},
-    {"name": "spawn_task", "description": "Start a browser task worker. Give it the outcome you want, the starting URL if known, and what to report. Returns a task_id; the report arrives automatically.",
-     "parameters": {"type": "object", "properties": {
-       "instruction": {"type": "string"}, "start_url": {"type": "string"}, "title": {"type": "string"},
-       "allow_credentials": {"type": "boolean", "default": false, "description": "Whether the worker may request credential fills for sign-in (each fill still needs user approval)."}},
-      "required": ["instruction"], "additionalProperties": false}},
-    {"name": "steer_task", "description": "Send new instructions to a running or parked browser task.",
-     "parameters": {"type": "object", "properties": {"task_id": {"type": "string"}, "instruction": {"type": "string"}}, "required": ["task_id", "instruction"], "additionalProperties": false}},
-    {"name": "list_tasks", "description": "List browser tasks and their status.", "parameters": {"type": "object", "properties": {}, "additionalProperties": false}},
-    {"name": "stop_task", "description": "Stop a browser task.", "parameters": {"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"], "additionalProperties": false}}
-  ]}},
-  {"tool": {"namespace": "todo", "description": "Track open work items so nothing is dropped across interleaved messages and handoffs.", "functions": [
-    {"name": "write", "description": "Replace the todo list.",
-     "parameters": {"type": "object", "properties": {"items": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "text": {"type": "string"}, "status": {"type": "string", "enum": ["open", "in_progress", "done"]}}, "required": ["text", "status"]}}}, "required": ["items"], "additionalProperties": false}},
-    {"name": "read", "description": "Read the todo list.", "parameters": {"type": "object", "properties": {}, "additionalProperties": false}}
-  ]}},
-  {"tool": {"namespace": "tool_search", "description": "Expand deferred tool namespaces.", "functions": [
-    {"name": "load_tool_namespace", "description": "Load the full schemas for a deferred namespace so its functions can be called.",
-     "parameters": {"type": "object", "properties": {"namespace": {"type": "string"}}, "required": ["namespace"], "additionalProperties": false}}
-  ]}}
+ {
+  "tool": {
+   "namespace": "muse",
+   "description": "Core runtime tools: shell, files, memory, todo.",
+   "functions": [
+    {
+     "name": "exec",
+     "description": "Run a shell command on your computer. Use background=true for anything longer than a few seconds; its terminal result is delivered to you automatically when it finishes, so never poll for it.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "command": {
+        "type": "string",
+        "description": "The shell command to run."
+       },
+       "workdir": {
+        "type": "string",
+        "description": "Working directory. Defaults to ~."
+       },
+       "timeout_s": {
+        "type": "integer",
+        "description": "Seconds before the command is killed. Default 60 foreground, 1800 background."
+       },
+       "background": {
+        "type": "boolean",
+        "description": "Return immediately with a session_id; the result arrives later."
+       }
+      },
+      "required": [
+       "command"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "read",
+     "description": "Read a text file with paging. Paths resolve relative to ~.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "offset": {
+        "type": "integer",
+        "description": "1-based first line."
+       },
+       "limit": {
+        "type": "integer",
+        "description": "Max lines, default 200."
+       }
+      },
+      "required": [
+       "path"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "write",
+     "description": "Create or overwrite a text file. Parent directories are created.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "content": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "path",
+       "content"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "edit",
+     "description": "Replace an exact string in a file once. The old string must match exactly and be unique.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string"
+       },
+       "old": {
+        "type": "string"
+       },
+       "new": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "path",
+       "old",
+       "new"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "memory_search",
+     "description": "Semantic search over MEMORY.md and ~/memory/*.md. Returns top snippets with path and line citations like MEMORY.md#L7. Use before answering anything about prior work, dates, people, preferences, or history.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "queries": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        },
+        "minItems": 1,
+        "maxItems": 3,
+        "description": "1 to 3 phrasings; queries[0] closest to the user's wording."
+       },
+       "maxResults": {
+        "type": "integer",
+        "default": 8
+       },
+       "minScore": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+       }
+      },
+      "required": [
+       "queries"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "memory_get",
+     "description": "Read lines from a memory file cited by memory_search.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "path": {
+        "type": "string",
+        "description": "Memory-relative path, e.g. MEMORY.md or memory/2026-09-10.md"
+       },
+       "from": {
+        "type": "integer",
+        "description": "1-based first line."
+       },
+       "lines": {
+        "type": "integer",
+        "description": "How many lines, default 40."
+       }
+      },
+      "required": [
+       "path"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "memory_explain",
+     "description": "Provenance for one memory claim: who said it, the quote, when first learned and last reinforced, current confidence, the earlier claims it replaced and the later ones that replaced it.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "ref": {
+        "type": "string",
+        "description": "A claim id, a memory:// URI, or a citation like memory/2026-09-09.md#L7"
+       }
+      },
+      "required": [
+       "ref"
+      ],
+      "additionalProperties": false
+     }
+    }
+   ]
+  }
+ },
+ {
+  "tool": {
+   "namespace": "process",
+   "description": "Manage background shell sessions started with muse.exec background=true.",
+   "functions": [
+    {
+     "name": "list",
+     "description": "List background sessions with status.",
+     "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "log",
+     "description": "Read recent output of a session.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "session_id": {
+        "type": "string"
+       },
+       "tail": {
+        "type": "integer",
+        "default": 200
+       }
+      },
+      "required": [
+       "session_id"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "poll",
+     "description": "Check whether a session has finished and get its exit code.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "session_id": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "session_id"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "kill",
+     "description": "Terminate a session.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "session_id": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "session_id"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "write",
+     "description": "Write to a session's stdin.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "session_id": {
+        "type": "string"
+       },
+       "data": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "session_id",
+       "data"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "send_keys",
+     "description": "Send key presses to an interactive session (e.g. 'Enter', 'C-c').",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "session_id": {
+        "type": "string"
+       },
+       "keys": {
+        "type": "array",
+        "items": {
+         "type": "string"
+        }
+       }
+      },
+      "required": [
+       "session_id",
+       "keys"
+      ],
+      "additionalProperties": false
+     }
+    }
+   ]
+  }
+ },
+ {
+  "tool": {
+   "namespace": "subagent",
+   "description": "Delegate self-contained work to child agents that run in the background. Children start with no inherited transcript, so brief them fully. Results are delivered to you automatically; never poll.",
+   "functions": [
+    {
+     "name": "spawn",
+     "description": "Start a subagent on a task. Returns a spawn_id immediately.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "message": {
+        "type": "string",
+        "description": "The complete brief: goal, context, constraints, what to report back."
+       },
+       "items": {
+        "type": "array",
+        "description": "Optional multimodal items (text, image paths) in place of message.",
+        "items": {
+         "type": "object"
+        }
+       },
+       "label": {
+        "type": "string",
+        "description": "Short human-readable label shown in the activity feed."
+       },
+       "timeout_s": {
+        "type": "integer",
+        "default": 1800
+       }
+      },
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "list",
+     "description": "List subagents with status: running, done, interrupted, failed.",
+     "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "send",
+     "description": "Send a follow-up message to a running subagent.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "spawn_id": {
+        "type": "string"
+       },
+       "message": {
+        "type": "string"
+       },
+       "interrupt": {
+        "type": "boolean",
+        "default": false
+       }
+      },
+      "required": [
+       "spawn_id",
+       "message"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "resume",
+     "description": "Restart an interrupted subagent from where it stopped.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "spawn_id": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "spawn_id"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "close",
+     "description": "Stop a subagent and discard it.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "spawn_id": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "spawn_id"
+      ],
+      "additionalProperties": false
+     }
+    }
+   ]
+  }
+ },
+ {
+  "tool": {
+   "namespace": "browser",
+   "description": "Your real Chromium. spawn_task starts an isolated browser worker on a natural-language task; steer_task continues one. search and open are fast read-only lookups.",
+   "functions": [
+    {
+     "name": "search",
+     "description": "Web search for public information. Returns results with titles, URLs, and snippets you can cite.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "query": {
+        "type": "string"
+       },
+       "max_results": {
+        "type": "integer",
+        "default": 8
+       }
+      },
+      "required": [
+       "query"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "open",
+     "description": "Open a page in your browser and return its readable text with line numbers for citation. The user sees the page in the app as a Browser card while you read it. Use it for any site visit; use browser.spawn_task when you need to click, type, sign in, or complete a flow.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "url": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "url"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "lookup_citation_url",
+     "description": "Resolve a citation marker from search or open results back to its exact URL.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "citation": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "citation"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "spawn_task",
+     "description": "Start a browser task worker. Give it the outcome you want, the starting URL if known, and what to report. Returns a task_id; the report arrives automatically.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "instruction": {
+        "type": "string"
+       },
+       "start_url": {
+        "type": "string"
+       },
+       "title": {
+        "type": "string"
+       },
+       "allow_credentials": {
+        "type": "boolean",
+        "default": false,
+        "description": "Whether the worker may request credential fills for sign-in (each fill still needs user approval)."
+       }
+      },
+      "required": [
+       "instruction"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "steer_task",
+     "description": "Send new instructions to a running or parked browser task.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "task_id": {
+        "type": "string"
+       },
+       "instruction": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "task_id",
+       "instruction"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "list_tasks",
+     "description": "List browser tasks and their status.",
+     "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "stop_task",
+     "description": "Stop a browser task.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "task_id": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "task_id"
+      ],
+      "additionalProperties": false
+     }
+    }
+   ]
+  }
+ },
+ {
+  "tool": {
+   "namespace": "todo",
+   "description": "Track open work items so nothing is dropped across interleaved messages and handoffs.",
+   "functions": [
+    {
+     "name": "write",
+     "description": "Replace the todo list.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "items": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "properties": {
+          "id": {
+           "type": "string"
+          },
+          "text": {
+           "type": "string"
+          },
+          "status": {
+           "type": "string",
+           "enum": [
+            "open",
+            "in_progress",
+            "done"
+           ]
+          }
+         },
+         "required": [
+          "text",
+          "status"
+         ]
+        }
+       }
+      },
+      "required": [
+       "items"
+      ],
+      "additionalProperties": false
+     }
+    },
+    {
+     "name": "read",
+     "description": "Read the todo list.",
+     "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+     }
+    }
+   ]
+  }
+ },
+ {
+  "tool": {
+   "namespace": "tool_search",
+   "description": "Expand deferred tool namespaces.",
+   "functions": [
+    {
+     "name": "load_tool_namespace",
+     "description": "Load the full schemas for a deferred namespace so its functions can be called.",
+     "parameters": {
+      "type": "object",
+      "properties": {
+       "namespace": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "namespace"
+      ],
+      "additionalProperties": false
+     }
+    }
+   ]
+  }
+ }
 ]

@@ -27,6 +27,7 @@ import { registerForPush, useNotificationTaps } from "./src/push";
 import { OnboardingScreen } from "./src/screens/OnboardingScreen";
 import { BrowserScreen } from "./src/screens/BrowserScreen";
 import { syncHealthIfConnected } from "./src/health";
+import type { CredentialRequest } from "./src/api";
 import { HubScreen } from "./src/screens/HubScreen";
 import { ChatScreen, describe, statusTitle, type LiveTurn } from "./src/screens/ChatScreen";
 import { IdeasScreen } from "./src/screens/IdeasScreen";
@@ -94,6 +95,7 @@ function App() {
   const [keyboard, setKeyboard] = useState(false);
   const [onboarding, setOnboarding] = useState<"unknown" | "needed" | "done">("unknown");
   const [browserView, setBrowserView] = useState<{ mode: "task" | "free"; taskId?: string } | null>(null);
+  const [credRequests, setCredRequests] = useState<Record<string, CredentialRequest>>({});
   const [signinName, setSigninName] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -124,15 +126,26 @@ function App() {
   const onFrame = useCallback((f: Frame) => {
     switch (f.type) {
       case "history":
+        setNotice(null);
         setMessages(f.messages);
+        if (f.credential_requests) setCredRequests(Object.fromEntries(f.credential_requests.map((q) => [q.id, q])));
         setAssistant(f.assistant && f.assistant !== "your assistant" ? f.assistant : "Muse");
         setBusy(f.status === "running");
         if (f.status !== "running") setLive(null);
         break;
       case "turn_start":
         setBusy(true);
-        if (f.user_text) setMessages((m) => [...m, { role: "user", text: f.user_text! }]);
+        if (f.user_text && f.user_text.trim() !== pendingEcho.current) setMessages((m) => [...m, { role: "user", text: f.user_text! }]);
+        pendingEcho.current = null;
         setLive({ text: "", steps: [] });
+        break;
+      case "credential_request":
+        setCredRequests((m) => ({ ...m, [f.request.id]: f.request }));
+        break;
+      case "status":
+        // a waking/setup status stays until the cell's history frame replaces it
+        if (noticeTimer.current) clearTimeout(noticeTimer.current);
+        setNotice(f.message);
         break;
       case "text_delta":
         setLive((l) => ({ text: (l?.text ?? "") + f.text, steps: l?.steps ?? [] }));
@@ -216,8 +229,19 @@ function App() {
     setDeciding(null);
   }, [api]);
 
-  const sendToChat = useCallback((text: string) => { setTab("chat"); socket.current?.send(text); }, []);
-  const sendFromOrb = useCallback((text: string) => { socket.current?.send(text); }, []);
+  // Show the user's message the moment it is sent; the cell may still be waking. When the cell
+  // echoes it at turn start we skip the duplicate.
+  const pendingEcho = useRef<string | null>(null);
+  const sendText = useCallback((text: string) => {
+    const t = text.trim();
+    if (!t) return;
+    pendingEcho.current = t;
+    setMessages((m) => [...m, { role: "user", text: t }]);
+    setBusy(true); setLive({ text: "", steps: [] });
+    socket.current?.send(t);
+  }, []);
+  const sendToChat = useCallback((text: string) => { setTab("chat"); sendText(text); }, [sendText]);
+  const sendFromOrb = useCallback((text: string) => { sendText(text); }, [sendText]);
 
   const signOut = useCallback(async () => {
     await clearSession();
@@ -275,9 +299,12 @@ function App() {
             onConnect={() => setPage("connectors")} />
         ) : tab === "chat" ? (
           <ChatScreen assistant={assistant} messages={messages} live={live} busy={busy}
-            onSend={(t) => socket.current?.send(t)} onStop={() => socket.current?.stop()}
+            onSend={sendText} onStop={() => socket.current?.stop()}
+            credRequests={credRequests}
+            onDeclineCredential={(id) => { api.declineCredential(id).catch(() => {}); }}
+            onCredentialSaved={() => { api.credentials().then((r) => setCredRequests(Object.fromEntries(r.requests.map((q) => [q.id, q])))).catch(() => {}); }}
             card={browser ? <BrowserCard task={browser} onStop={() => { api.stopBrowserTask(browser.task_id).catch(() => {}); }}
-              onOpen={(id) => { setBrowserView({ mode: "task", taskId: id }); setPage("browser"); }} /> : null}
+              onOpen={(id) => { setBrowserView(id.startsWith("reader") ? { mode: "free" } : { mode: "task", taskId: id }); setPage("browser"); }} /> : null}
             footer={approvals.length ? (
               <ApprovalCard approval={approvals[0]} busy={deciding === approvals[0].id} onDecide={(d) => decide(approvals[0].id, d)} />
             ) : null} />

@@ -27,6 +27,19 @@ mkdir -p /data /run/postgresql "$HOME_ROOT"
 chown postgres:postgres /run/postgresql
 chown hatch:hatch "$HOME_ROOT"
 
+# The vault key (OAuth tokens, Secure Store) is born here on the cell's volume and never leaves it.
+# A cell created before this existed got its key from the gateway env: adopt it once, then the file rules.
+VAULT_KEY_FILE=/data/vault.key
+if [ ! -s "$VAULT_KEY_FILE" ]; then
+    if [ -n "${SUPERAPP_VAULT_KEY:-}" ]; then
+        printf '%s' "$SUPERAPP_VAULT_KEY" > "$VAULT_KEY_FILE"
+    else
+        ./.venv/bin/python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode(), end='')" > "$VAULT_KEY_FILE"
+    fi
+    chown hatch:hatch "$VAULT_KEY_FILE" && chmod 600 "$VAULT_KEY_FILE"
+fi
+export SUPERAPP_VAULT_KEY="$(cat "$VAULT_KEY_FILE")"
+
 if [ ! -s "$PGDATA/PG_VERSION" ]; then
     echo "cell: initialising Postgres at $PGDATA"
     mkdir -p "$PGDATA" && chown postgres:postgres "$PGDATA" && chmod 700 "$PGDATA"

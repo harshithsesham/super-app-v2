@@ -26,7 +26,7 @@ PASSTHROUGH = ["META_API_KEY", "MODEL_API_KEY", "MODEL", "MODEL_API_BASE",
                "SUPERAPP_GMAIL_SCOPE_TIER", "SUPERAPP_GMAIL_API_BASE", "SUPERAPP_PUBLIC_URL", "SUPERAPP_TZ",
                "SUPERAPP_ELEVENLABS_API_KEY", "SUPERAPP_ELEVENLABS_MODEL", "SUPERAPP_VOICE_ID",
                "SUPERAPP_CELL_IDLE_EXIT_SECS", "SUPERAPP_LOG_LEVEL"]
-STATE_PATHS = ("/v1/gmail/connect", "/v1/gmail/callback", "/v1/gmail/disconnect")   # unauthenticated, carry a signed state
+STATE_PATHS = ("/v1/gmail/connect", "/v1/gmail/callback", "/v1/gmail/disconnect", "/v1/credentials/entry")   # unauthenticated, signed state
 HOP_HEADERS = {"connection", "keep-alive", "transfer-encoding", "upgrade", "host", "authorization"}
 
 
@@ -40,6 +40,10 @@ class Cells:
         self.path = home_root / ".cells.json"
         home_root.mkdir(parents=True, exist_ok=True)
         self.cells: dict[str, dict] = json.loads(self.path.read_text()) if self.path.exists() else {}
+        if any("vault_key" in c for c in self.cells.values()):   # older registries held cell vault keys; they live on the cell now
+            for c in self.cells.values():
+                c.pop("vault_key", None)
+            self._save()
         self.fly = FlyMachines()
         self.region = os.environ.get("FLY_CELLS_REGION", "ord")
         self.image = os.environ.get("FLY_CELLS_IMAGE", "registry.fly.io/muse-cells:latest")
@@ -77,7 +81,8 @@ class Cells:
         env = {k: os.environ[k] for k in PASSTHROUGH if os.environ.get(k)}
         if "SUPERAPP_CELL_IDLE_EXIT_SECS" in env:
             env["SUPERAPP_IDLE_EXIT_SECS"] = env.pop("SUPERAPP_CELL_IDLE_EXIT_SECS")
-        env.update({"SUPERAPP_CELL_USER": user, "SUPERAPP_CELL_TOKEN": cell["token"], "SUPERAPP_VAULT_KEY": cell["vault_key"],
+        # the vault key is born on the cell's own volume (entrypoint.sh); the gateway never holds it
+        env.update({"SUPERAPP_CELL_USER": user, "SUPERAPP_CELL_TOKEN": cell["token"],
                     "SUPERAPP_HOME_ROOT": "/data/users", "SUPERAPP_PORT": str(CELL_PORT)})
         if self.gateway_url:
             env["SUPERAPP_GATEWAY_URL"] = self.gateway_url
@@ -88,7 +93,7 @@ class Cells:
         with self._ulock(user):
             if user in self.cells:
                 return self.cells[user]
-            cell = {"user": user, "token": secrets.token_urlsafe(24), "vault_key": Fernet.generate_key().decode(),
+            cell = {"user": user, "token": secrets.token_urlsafe(24),
                     "created_at": time.time(), "next_due_utc": None, "last_state": None}
             vol = self.fly.create_volume(f"cell_{_slug(user)}", self.region, int(os.environ.get("FLY_CELLS_VOLUME_GB", "10")))
             cell["volume_id"] = vol["id"]
@@ -296,6 +301,10 @@ class Cells:
         cell = None
         reported = False
         try:
+            known = self.cells.get(user)
+            if known is None or known.get("last_state") != "started":
+                # the app shows this under the name until the cell's history frame arrives
+                await ws.send_text(json.dumps({"type": "status", "message": "Waking up your agent…" if known else "Setting up your agent…"}))
             while cell is None:
                 try:
                     cell = await asyncio.to_thread(self.awake, user)
@@ -356,11 +365,10 @@ class GatewayMiddleware:
 def user_from_state(state: str) -> str | None:
     """Gmail connect/callback states are `connect|<home>|ts|sig`; the home's last segment is the user.
     The cell verifies the signature itself; the gateway only needs to know where to send it."""
-    try:
-        _, home, _, _ = urllib.parse.unquote(state).split("|")
-        return pathlib.PurePosixPath(home).name or None
-    except ValueError:
+    parts = urllib.parse.unquote(state).split("|")
+    if len(parts) < 4:
         return None
+    return pathlib.PurePosixPath(parts[1]).name or None
 
 
 def _slug(user: str) -> str:

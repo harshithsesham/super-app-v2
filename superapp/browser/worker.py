@@ -259,6 +259,25 @@ def automation(actions: list[dict], _ctx: dict | None = None):
             receipts.append({"action": a.get("action"), "dispatch": "not_started", "actionability_reason": "skipped after an earlier failure"})
             continue
         kind = str(a.get("action", ""))
+        if kind == "fill_credential":
+            # Secure Store: the value goes from the vault into the page; the model only sees a receipt
+            from ..connectors import credstore
+            site = str(a.get("site") or "") or d.page.url
+            rec = credstore.secret(t.parent.memory.home, site, "api_key" if a.get("field") == "api_key" else "login")
+            field = str(a.get("field", "password"))
+            if not rec or field not in rec.get("fields", {}):
+                receipts.append({"action": kind, "dispatch": "not_started",
+                                 "actionability_reason": f"no saved {field} for {credstore.site_of(site)} in the Secure Store; ask the parent to request one"})
+                blocked = True
+                continue
+            r = d.fill_secret(str(a.get("ref", "")), rec["fields"][field], bool(a.get("submit")))
+            rp = r.public(); rp["field"] = field; rp["site"] = rec["site"]
+            receipts.append(rp)
+            t.step_count += 1
+            if r.dispatch != "done":
+                blocked = True
+            t.status_title = "Signing in…"
+            continue
         # purchases and submissions on payment pages stop at an approval card
         if kind in ("click", "type", "press") and _looks_sensitive(d, a):
             decision = _approve(t, a)

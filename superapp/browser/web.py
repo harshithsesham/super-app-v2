@@ -47,10 +47,52 @@ def search(query: str, max_results: int = 8, _ctx: dict | None = None):
     return {"query": query, "results": out}
 
 
+_READS = {"n": 0}
+
+
+def _open_visibly(url: str, agent) -> dict | None:
+    """Open the page in the agent's real browser so the app shows it as a Browser card, like Muse.
+    Returns None when the browser is not available (a task holds the profile, or Chromium failed)."""
+    from . import live, worker
+    if agent is None or getattr(agent, "role", "") != "chat":
+        return None
+    home = agent.memory.home
+    for t in worker.TASKS.values():
+        if t.parent.id == agent.id and t.driver is not None and t.status in ("queued", "running", "needs_user"):
+            return None
+    _READS["n"] += 1
+    task_id = f"reader_{_READS['n']}"
+    host = urllib.parse.urlsplit(url).netloc or url
+    try:
+        s = live.open_session(home)
+        agent.on_event("browser_step", {"task_id": task_id, "title": f"Reading {host}", "status": "running",
+                                        "status_title": "Opening…", "url": url, "screenshot": ""})
+        res = s.command({"type": "read", "url": url}, timeout=45)
+        if res.get("error"):
+            agent.on_event("browser_step", {"task_id": task_id, "title": f"Reading {host}", "status": "failed",
+                                            "status_title": "Couldn't open", "url": url, "screenshot": res.get("screenshot", "")})
+            return None
+        agent.on_event("browser_step", {"task_id": task_id, "title": res.get("title") or f"Reading {host}", "status": "completed",
+                                        "status_title": "Read", "url": res.get("url", url), "screenshot": res.get("screenshot", "")})
+        return res
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @REGISTRY.register("browser.open")
 def open_page(url: str, _ctx: dict | None = None):
     if not re.match(r"https?://", url):
         url = "https://" + url
+    seen = _open_visibly(url, (_ctx or {}).get("agent"))
+    if seen is not None:
+        text, title, final_url, status = seen.get("text", ""), seen.get("title", ""), seen.get("url", url), 200
+        lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+        truncated = len(lines) > MAX_LINES
+        lines = lines[:MAX_LINES]
+        numbered = "\n".join(f"L{i}: {ln[:400]}" for i, ln in enumerate(lines, 1))
+        _cites(_ctx)[f"page:{final_url}"] = final_url
+        return {"url": final_url, "status": status, "title": title[:200], "lines": len(lines), "truncated": truncated,
+                "text": numbered, "cite_as": "L{start}-L{end} of this page", "shown_to_user": True}
     try:
         r = httpx.get(url, headers={"User-Agent": UA, "Accept-Language": "en-US"}, timeout=25, follow_redirects=True)
     except httpx.HTTPError as e:

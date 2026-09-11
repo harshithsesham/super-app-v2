@@ -58,6 +58,15 @@ def execute(driver: Driver, cmd: dict) -> dict:
             _forget_on(driver, str(cmd.get("domain", "")))
         elif kind == "cookies":
             return {"cookies": [{"domain": c.get("domain", ""), "expires": c.get("expires", -1)} for c in driver.ctx.cookies()]}
+        elif kind == "read":
+            # the agent reading a page: open it here so the user sees it, then hand back the readable text
+            url = str(cmd.get("url", "")).strip()
+            if url and not url.startswith(("http://", "https://")):
+                url = "https://" + url
+            page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            driver._settle()
+            text = page.evaluate("() => (document.body && document.body.innerText) || ''")
+            return state(driver, {"text": str(text)[:120000]})
         elif kind != "state":
             err = f"unknown input {kind!r}"
     except Exception as e:  # noqa: BLE001

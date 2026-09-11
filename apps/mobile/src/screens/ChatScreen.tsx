@@ -7,6 +7,8 @@ import { FlatList, StyleSheet, Text, TextInput, View } from "react-native";
 import { Pressable } from "../ui/Tap";
 import { MicIcon } from "../ui/Icons";
 import { C, R } from "../theme";
+import { CredentialCard } from "../ui/CredentialCard";
+import type { CredentialRequest } from "../api";
 import type { ChatMessage } from "../api";
 
 export type LiveTurn = { text: string; steps: string[] } | null;
@@ -83,6 +85,9 @@ export function ChatScreen({
   onStop,
   footer,
   card,
+  credRequests,
+  onDeclineCredential,
+  onCredentialSaved,
 }: {
   assistant: string;
   messages: ChatMessage[];
@@ -92,6 +97,9 @@ export function ChatScreen({
   onStop: () => void;
   footer?: React.ReactNode;
   card?: React.ReactNode;   // an inline card that follows the thread (browser task)
+  credRequests?: Record<string, CredentialRequest>;
+  onDeclineCredential?: (id: string) => void;
+  onCredentialSaved?: () => void;
 }) {
   const [draft, setDraft] = useState("");
 
@@ -140,6 +148,21 @@ export function ChatScreen({
             <Text style={s.handoffTitle}>Background work finished</Text>
             <Text style={s.handoffText} numberOfLines={2}>{m.text.split("\n").slice(1).join(" ").slice(0, 160)}</Text>
           </View>
+        </View>
+      );
+    }
+    // Secure Store cards ride inside the reply as [[secure-store:<id>]] lines, like Muse's embed tokens
+    const parts = m.text.split(/^\s*\[\[secure-store:([a-z0-9_]+)\]\]\s*$/m);
+    if (parts.length > 1) {
+      return (
+        <View style={[s.agentCol, { gap: 8 }]}>
+          {parts.map((part, i) => {
+            if (i % 2 === 1) {
+              const req = credRequests?.[part];
+              return req ? <CredentialCard key={part} request={req} onDecline={onDeclineCredential} onSaved={onCredentialSaved} /> : null;
+            }
+            return part.trim() ? <View key={i} style={s.agentBubble}><Text style={s.agentText}>{part.trim()}</Text></View> : null;
+          })}
         </View>
       );
     }

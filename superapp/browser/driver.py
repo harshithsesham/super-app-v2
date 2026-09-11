@@ -18,7 +18,7 @@ SNAPSHOT_JS = r"""
   const name = (el) => {
     const pick = (v) => (v || '').replace(/\s+/g, ' ').trim();
     return pick(el.getAttribute('aria-label')) || pick(el.getAttribute('placeholder')) || pick(el.alt) || pick(el.title)
-      || pick(el.innerText) || pick(el.value) || pick(el.getAttribute('name')) || pick(el.id);
+      || pick(el.innerText) || (el.type === 'password' ? '' : pick(el.value)) || pick(el.getAttribute('name')) || pick(el.id);
   };
   const role = (el) => {
     const r = el.getAttribute('role'); if (r) return r;
@@ -37,7 +37,7 @@ SNAPSHOT_JS = r"""
     i += 1; const ref = 'e' + i; el.setAttribute('data-muse-ref', ref);
     const r = role(el); let line = `[${ref}] ${r} "${name(el).slice(0, 80)}"`;
     if (r === 'link' && el.href) { try { const u = new URL(el.href); line += ` (${u.pathname.slice(0, 60)}${u.search ? '?' : ''})`; } catch {} }
-    if (r === 'textbox' && el.value) line += ` value="${String(el.value).slice(0, 40)}"`;
+    if (r === 'textbox' && el.value) line += el.type === 'password' ? ' value="•••"' : ` value="${String(el.value).slice(0, 40)}"`;
     if ((r === 'checkbox' || r === 'radio') && el.checked) line += ' [checked]';
     if (el.disabled) line += ' [disabled]';
     out.push(line);
@@ -78,6 +78,7 @@ class Driver:
         self.page = self.ctx.pages[0] if self.ctx.pages else self.ctx.new_page()
         self.page.set_default_timeout(15000)
         self.snapshot_epoch = 0
+        self.secrets: set[str] = set()   # Secure Store values typed into this session; scrubbed from every observation
 
     def close(self):
         try:
@@ -93,8 +94,13 @@ class Driver:
             pass
         data = self.page.evaluate(SNAPSHOT_JS, max_items)
         self.snapshot_epoch += 1
-        return {"url": self.page.url, "title": self.page.title(), "elements": data["items"],
-                "elements_total": data["total"], "text": data["text"],
+        items, text = data["items"], data["text"]
+        for sec in self.secrets:   # a filled secret never comes back through a snapshot, whatever the page does with it
+            if sec:
+                items = [it.replace(sec, "•••") for it in items]
+                text = text.replace(sec, "•••")
+        return {"url": self.page.url, "title": self.page.title(), "elements": items,
+                "elements_total": data["total"], "text": text,
                 "scroll": f"{data['scrollY']}/{max(0, data['scrollH'] - data['innerH'])}", "epoch": self.snapshot_epoch}
 
     def screenshot_b64(self) -> str:
@@ -111,6 +117,23 @@ class Driver:
         if loc.count() == 0:
             raise LookupError("stale_ref_scope: that reference is not on the current page; take a fresh snapshot")
         return loc.first
+
+    def fill_secret(self, ref: str, value: str, submit: bool = False) -> Receipt:
+        """Type a Secure Store value into a field. The receipt never carries the value."""
+        r = Receipt("fill_credential")
+        self.secrets.add(value)
+        try:
+            loc = self._loc(ref)
+            loc.click(timeout=8000)
+            loc.fill(value)
+            if submit:
+                loc.press("Enter")
+                self._settle()
+        except LookupError as e:
+            r.dispatch, r.actionability_reason = "not_started", str(e)
+        except Exception as e:  # noqa: BLE001
+            r.dispatch, r.actionability_reason = "not_started", str(e).splitlines()[0][:200]
+        return r
 
     def act(self, a: dict) -> Receipt:
         kind = str(a.get("action", ""))

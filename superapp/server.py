@@ -26,7 +26,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from .config import CONFIG
 from .memory.files import HomeMemory
 from .prompts import skills_catalog
-from .tools import local, memory_tools  # noqa: F401  registers handlers
+from .tools import local, memory_tools, credentials as credential_tools  # noqa: F401  registers handlers
 from .agent import subagents  # noqa: F401
 from .browser import worker as browser_worker, web as browser_web, live as browser_live  # noqa: F401
 from .agent.loop import Agent
@@ -35,7 +35,7 @@ from . import auth, db, hub, voice
 from .approvals import Approval, ApprovalStore
 from .scheduler import tools as scheduler_tools  # noqa: F401  registers cron.*, hooks.*, muse.nothing_to_do
 from .scheduler.engine import Engine
-from .connectors import vault, health as health_store
+from .connectors import vault, health as health_store, credstore
 from .connectors.gmail import CALENDAR_SCOPE, GmailClient, configured as gmail_configured
 from .cells import gateway
 
@@ -371,6 +371,12 @@ class Room:
         self._send({"type": "text_delta", "text": s})
 
     def _on_event(self, kind: str, data: dict):
+        if kind == "credential_request":
+            req = data.get("request") or {}
+            self._send({"type": "credential_request", "request": _cred_public(self, req)})
+            if req.get("status") == "pending":
+                self.notify("Muse needs a sign-in", f"Add your login for {req.get('site')} in the Secure Store.", {"tab": "chat"}, thread_id="credentials")
+            return
         if kind == "browser_step":
             # keep the latest card per task for late-joining clients; screenshots stay out of the event log
             prev = self.browser_tasks.get(data["task_id"], {})
@@ -618,6 +624,116 @@ def _cookie_host(r: Room):
     if t is not None:
         return t if t.status == "needs_user" else None   # a running worker owns the thread
     return browser_live.current(r.home)
+
+
+# ------------------------------------------------------------ secure store ----
+ENTRY_CSS = ("body{font-family:-apple-system,sans-serif;background:#08070E;color:#F2F0FA;margin:0;padding:28px 20px}"
+             "h1{font-size:22px;margin:0 0 6px}p{color:#A9A4BD;font-size:14px;margin:0 0 18px}label{display:block;font-size:13px;color:#A9A4BD;margin:14px 0 6px}"
+             "input{width:100%;box-sizing:border-box;font-size:17px;padding:14px;border-radius:14px;border:1px solid #2A2540;background:#14111F;color:#F2F0FA}"
+             "button{width:100%;margin-top:22px;font-size:17px;font-weight:600;padding:15px;border-radius:999px;border:0;background:#C7B8FF;color:#14101F}"
+             ".ghost{background:transparent;color:#C7B8FF;border:1px solid #2A2540;margin-top:10px}.ok{font-size:40px;text-align:center}")
+
+
+def _cred_state(r: Room, rid: str) -> str:
+    ts = str(int(time.time()))
+    msg = f"cred|{r.home}|{rid}|{ts}"
+    sig = hmac.new(INTERNAL_TOKEN.encode(), msg.encode(), hashlib.sha256).hexdigest()
+    return urllib.parse.quote(f"{msg}|{sig}", safe="")
+
+
+def _verify_cred_state(state: str) -> tuple[Room, dict]:
+    try:
+        act, home, rid, ts, sig = urllib.parse.unquote(state).split("|")
+    except ValueError:
+        raise HTTPException(400, "bad state")
+    msg = f"cred|{home}|{rid}|{ts}"
+    if act != "cred" or not hmac.compare_digest(sig, hmac.new(INTERNAL_TOKEN.encode(), msg.encode(), hashlib.sha256).hexdigest()) or time.time() - int(ts) > 3600:
+        raise HTTPException(403, "bad or expired link")
+    r = room_for_home(home)
+    if not r:
+        raise HTTPException(404, "no agent for that home")
+    req = credstore.get_request(r.home, rid)
+    if not req:
+        raise HTTPException(404, "no such request")
+    return r, req
+
+
+def _cred_public(r: Room, req: dict) -> dict:
+    return {**{k: v for k, v in req.items() if k not in ("username_hint",)},
+            "entry_url": f"{PUBLIC_URL}/v1/credentials/entry?state={_cred_state(r, req['id'])}"}
+
+
+@app.get("/v1/credentials")
+def credentials_list(user: str = Depends(current_user)):
+    r = room_for(user)
+    return {"logins": credstore.list_entries(r.home), "requests": [_cred_public(r, q) for q in credstore.requests(r.home)][-20:]}
+
+
+@app.post("/v1/credentials/{eid}/delete")
+def credentials_delete(eid: str, user: str = Depends(current_user)):
+    return {"removed": credstore.delete(room_for(user).home, eid)}
+
+
+@app.post("/v1/credentials/requests/{rid}/decline")
+def credentials_decline(rid: str, user: str = Depends(current_user)):
+    r = room_for(user)
+    req = credstore.update_request(r.home, rid, status="declined")
+    if not req:
+        raise HTTPException(404, "no such request")
+    r._on_event("credential_request", {"agent": r.agent.id, "request": req})
+    r.agent.deliver(f"[Secure Store] The user declined the entry card for {req['site']}. Do not offer it again in this task; "
+                    "if they give the value in chat, follow the Secure Vault rules.")
+    return {"ok": True}
+
+
+@app.get("/v1/credentials/entry")
+def credentials_entry(state: str):
+    """The secure entry page. Unauthenticated link, signed; the user types here and nothing passes through the chat."""
+    r, req = _verify_cred_state(state)
+    if req["status"] == "saved":
+        return HTMLResponse(f"<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><style>{ENTRY_CSS}</style>"
+                            f"<div class='ok'>&#10003;</div><h1 style='text-align:center'>Already saved</h1><p style='text-align:center'>{req['site']}</p>")
+    kind = req["kind"]
+    if kind == "api_key":
+        fields = "".join(f"<label>{f.replace('_', ' ').title()}</label><input name='{f}' autocomplete='off' autocapitalize='none' required>" for f in req.get("fields", ["api_key"]))
+        title, sub = f"API access for {req.get('provider', req['site'])}", "Stored in your private Secure Store. Your assistant can use it but never read it back."
+    elif kind == "new_password":
+        fields = ("<label>Username or email</label><input name='username' autocomplete='username' autocapitalize='none' required>"
+                  "<label>New password</label><input name='password' type='password' autocomplete='new-password' required id='pw'>"
+                  "<button type='button' class='ghost' onclick=\"document.getElementById('pw').value=[...crypto.getRandomValues(new Uint8Array(20))].map(b=>'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#%'[b%64]).join('');document.getElementById('pw').type='text'\">Generate a strong password</button>")
+        title, sub = f"Set a password for {req['site']}", "Saved to your Secure Store so your assistant can sign in for you later."
+    else:
+        fields = ("<label>Username or email</label><input name='username' autocomplete='username' autocapitalize='none' required>"
+                  "<label>Password</label><input name='password' type='password' autocomplete='current-password' required>")
+        title, sub = f"Sign in to {req['site']}", "Typed here, encrypted in your Secure Store, never shown to your assistant."
+    return HTMLResponse(f"""<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><style>{ENTRY_CSS}</style>
+<h1>{title}</h1><p>{sub}</p><form method='post' action='{PUBLIC_URL}/v1/credentials/entry'><input type='hidden' name='state' value='{state}'>{fields}
+<button type='submit'>Save to Secure Store</button></form>""")
+
+
+@app.post("/v1/credentials/entry")
+async def credentials_entry_save(request: Request):
+    # a plain urlencoded form, parsed here so no multipart dependency is needed in the cell
+    raw = (await request.body()).decode("utf-8", "replace")
+    form = {k: v[0] for k, v in urllib.parse.parse_qs(raw, keep_blank_values=False).items()}
+    state = str(form.get("state", ""))
+    r, req = _verify_cred_state(state)
+    values = {k: str(v) for k, v in form.items() if k != "state" and str(v)}
+    if not values:
+        raise HTTPException(400, "nothing to save")
+    kind = "login" if req["kind"] == "new_password" else req["kind"]
+    label = req.get("provider") if req["kind"] == "api_key" else None
+    entry = credstore.save(r.home, kind, req["site"], req["page_url"], values, label=label)
+    updated = credstore.update_request(r.home, req["id"], status="saved", saved_at=time.time(), entry_id=entry["id"])
+    r._on_event("credential_request", {"agent": r.agent.id, "request": updated})
+    what = "API access" if req["kind"] == "api_key" else "login"
+    r.agent.deliver(f"[Secure Store] The user saved a {what} for {req['site']} (fields: {', '.join(entry['fields'])}). "
+                    "You cannot read it. To use it, run a browser task on the sign-in page and use the automation action "
+                    f"{{\"action\": \"fill_credential\", \"ref\": <field ref>, \"field\": \"username\" | \"password\"}} for each field, "
+                    "then submit. Continue the task that needed it.")
+    return HTMLResponse(f"""<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><style>{ENTRY_CSS}</style>
+<div class='ok'>&#10003;</div><h1 style='text-align:center'>Saved</h1><p style='text-align:center'>{req['site']} is in your Secure Store. Returning to the app&hellip;</p>
+<script>setTimeout(function() {{ location.href = 'superapp://credentials-saved'; }}, 700);</script>""")
 
 
 # ------------------------------------------------------------ apple health ----
@@ -1069,7 +1185,8 @@ async def ws_endpoint(ws: WebSocket, token: str = Query("")):
     r.loop = asyncio.get_running_loop()
     r.sockets.add(ws)
     await ws.send_text(json.dumps({"type": "history", "messages": r.history(), "assistant": r.agent.assistant_name(),
-                                   "status": r.agent.status}))
+                                   "status": r.agent.status,
+                                   "credential_requests": [_cred_public(r, q) for q in credstore.requests(r.home)][-20:]}))
     try:
         while True:
             raw = await ws.receive_text()

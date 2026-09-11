@@ -21,6 +21,11 @@ export type BrowserLive = {
 export type BrowserInput =
   | { type: "tap"; x: number; y: number } | { type: "type"; text: string; submit?: boolean } | { type: "key"; key: string }
   | { type: "scroll"; dy: number } | { type: "navigate"; url: string } | { type: "back" };
+export type CredentialRequest = {
+  id: string; kind: "login" | "new_password" | "api_key"; site: string; page_url: string; status: "pending" | "saved" | "declined";
+  embed_token: string; entry_url: string; provider?: string; created_at: number;
+};
+export type SavedLogin = { id: string; kind: string; site: string; label?: string; fields: string[]; updated_at: number };
 export type SavedSite = { site: string; cookies: number; last_used_at: number | null; persistent: boolean };
 export type Hub = {
   greeting: string; stamp: string;
@@ -31,7 +36,8 @@ export type Hub = {
 };
 
 export type Frame =
-  | { type: "history"; messages: ChatMessage[]; assistant: string; status: string }
+  | { type: "history"; messages: ChatMessage[]; assistant: string; status: string; credential_requests?: CredentialRequest[] }
+  | { type: "credential_request"; request: CredentialRequest }
   | { type: "turn_start"; user_text: string | null }
   | { type: "text_delta"; text: string }
   | { type: "event"; kind: string; data: Record<string, any>; ts: number; background?: boolean }
@@ -39,7 +45,9 @@ export type Frame =
   | { type: "approval"; approval: Approval }
   | { type: "approval_resolved"; id: string; decision: string }
   | { type: "browser"; task: BrowserTask }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "status"; message: string }
+  | { type: "ping" };
 
 const KEY = "session";
 
@@ -88,6 +96,9 @@ export class Api {
   browserTasks() { return this.req<{ tasks: BrowserTask[]; cards: BrowserTask[] }>("/v1/browser/tasks"); }
   hub() { return this.req<Hub>("/v1/hub"); }
   voiceStatus() { return this.req<{ tts: boolean; voice_id: string }>("/v1/voice/status"); }
+  credentials() { return this.req<{ logins: SavedLogin[]; requests: CredentialRequest[] }>("/v1/credentials"); }
+  deleteCredential(id: string) { return this.req<{ removed: boolean }>(`/v1/credentials/${id}/delete`, { method: "POST" }); }
+  declineCredential(id: string) { return this.req<{ ok: boolean }>(`/v1/credentials/requests/${id}/decline`, { method: "POST" }); }
   healthSync(payload: Record<string, unknown>) {
     return this.req<{ ok: boolean; counts: { metrics: number; sessions: number; samples: number } }>("/v1/health/sync", { method: "POST", body: JSON.stringify(payload) });
   }

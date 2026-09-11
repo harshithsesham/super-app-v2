@@ -25,7 +25,7 @@ export function BrowserCard({ task, onStop, onOpen }: { task: BrowserTask; onSto
       {shot ? <Image source={shot} style={s.shot} resizeMode="cover" /> : <View style={[s.shot, s.blank]} />}
       <View style={s.actions}>
         <Pressable style={s.open} feel="control" onPress={() => (onOpen ? onOpen(task.task_id) : setOpen(true))}>
-          <Text style={s.openText}>{task.status === "needs_user" ? "Take over" : live ? "Watch or take over" : "Open browser"}</Text>
+          <Text style={s.openText}>{task.status === "needs_user" ? "Take over" : live ? "Watch or take over" : task.task_id.startsWith("reader") ? "Open in browser" : "Open browser"}</Text>
         </Pressable>
         {live && onStop ? (
           <Pressable style={s.stop} feel="control" onPress={onStop}><Text style={s.stopText}>Stop</Text></Pressable>
