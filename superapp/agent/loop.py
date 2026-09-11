@@ -55,6 +55,8 @@ class Agent:
         self.approvals = None                      # ApprovalStore, attached by the daemon
         self.store = None                          # db.Store, attached by the daemon; None in file-only mode
         self.scheduler = None                      # scheduler.Engine, attached by the daemon to the root agent
+        self.loaded_ns: set[str] = set()           # deferred tool namespaces this agent has loaded (tool_search)
+        self.on_tools_loaded: Callable[[set[str]], None] | None = None   # the daemon persists the root agent's set
         # doctrine: subagents never get the browser, wallet, or purchase surfaces; depth>=2 cannot spawn
         self.exclude_ns: set[str] = set()
         if role != "chat":
@@ -98,7 +100,7 @@ class Agent:
     def system_prompt(self) -> str:
         ctx = assembler.default_context(
             self.role, tz=self.tz, assistant=self.assistant_name(),
-            runtime_section=REGISTRY.runtime_section(self.exclude_ns, self.only_tools),
+            runtime_section=REGISTRY.runtime_section(self.exclude_ns, self.only_tools, self.loaded_ns),
             standing_files="## Runtime Files (injected)\n" + self.memory.standing_files_section(),
             skills_section=skills_catalog.section(self.memory.home), depth=self.depth)
         if self.role == "browser_task":
@@ -155,7 +157,6 @@ class Agent:
         self._drain_inbox()
         if user_text is not None:
             self._append({"role": "user", "content": f"{self._time_tag()}\n{user_text}"})
-        tools = REGISTRY.openai_tools(self.exclude_ns, self.only_tools)
         effort = CONFIG.effort("root_agent" if self.depth == 0 else "subagent")
         final_text = ""
         self.stop_after_tools = False
@@ -166,6 +167,7 @@ class Agent:
                     return "[closed]"
                 self._maybe_compact()
                 messages = [{"role": "system", "content": self.system_prompt()}] + self.transcript
+                tools = REGISTRY.openai_tools(self.exclude_ns, self.only_tools, self.loaded_ns)   # a load mid-turn shows next round
                 content, tool_calls = self._stream_completion(messages, tools, effort)
                 msg: dict = {"role": "assistant", "content": content or ""}
                 if tool_calls:
@@ -229,8 +231,29 @@ class Agent:
             tc["function"]["arguments"] = json.dumps(parsed)
         return "".join(content_parts), tool_calls
 
+    def load_tools(self, ns: str) -> list[dict]:
+        """Load a deferred namespace for this agent: its functions join the request tool list from the next round."""
+        if ns not in REGISTRY.namespaces:
+            raise ToolError(f"no tool namespace named {ns!r}; namespaces: {', '.join(sorted(REGISTRY.namespaces))}")
+        if ns not in self.loaded_ns:
+            self.loaded_ns.add(ns)
+            self.on_event("tools_loaded", {"agent": self.id, "namespace": ns})
+            if self.on_tools_loaded:
+                try:
+                    self.on_tools_loaded(set(self.loaded_ns))
+                except Exception:  # noqa: BLE001
+                    pass
+        return REGISTRY.namespace_schemas(ns)
+
     def _run_tool(self, tc: dict) -> str:
         name = tc["function"]["name"]
+        # the model may call a deferred function it saw in the index without loading first: load and proceed
+        ns = unwire(name).split(".", 1)[0]
+        if REGISTRY.is_deferred(ns) and ns not in self.loaded_ns and (self.only_tools is None) and ns not in self.exclude_ns:
+            try:
+                self.load_tools(ns)
+            except ToolError:
+                pass
         try:
             args = json.loads(tc["function"]["arguments"] or "{}")
         except json.JSONDecodeError as e:

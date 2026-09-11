@@ -181,3 +181,14 @@ def load_tool_namespace(namespace: str):
         raise ToolError(f"unknown namespace {namespace}")
     REGISTRY.load_namespace(namespace)
     return {"loaded": namespace, "functions": REGISTRY.namespaces[namespace]["functions"]}
+
+
+@REGISTRY.register("tool_search.load_tool_namespace")
+def load_tool_namespace(namespace: str, _ctx: dict | None = None):
+    """Muse's deferred tools: return the full schemas for a namespace and make its functions callable."""
+    agent = (_ctx or {}).get("agent")
+    if agent is None:
+        raise ToolError("tool_search needs an agent context")
+    fns = agent.load_tools(str(namespace).strip().strip("`"))
+    return {"namespace": namespace, "loaded": True, "functions": fns,
+            "note": "These functions are now callable directly for the rest of this conversation."}

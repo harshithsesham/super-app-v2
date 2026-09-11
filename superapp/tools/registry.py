@@ -24,12 +24,18 @@ class ToolError(Exception):
     pass
 
 
+# Namespaces the model sees only as one-line stubs until it loads them with
+# tool_search.load_tool_namespace (Muse's deferred tools). Everything an agent
+# uses routinely stays fully loaded; these are the big, occasional surfaces.
+DEFAULT_DEFERRED = {"artifact", "feed", "credentials", "chat", "wallet", "channel"}
+
+
 class Registry:
     def __init__(self):
         self.schemas: dict[str, dict] = {}
         self.namespaces: dict[str, dict] = {}
         self.handlers: dict[str, Callable[..., Any]] = {}
-        self.deferred: set[str] = set()
+        self.deferred: set[str] = set(DEFAULT_DEFERRED)
         self._load()
 
     def _load(self):
@@ -58,17 +64,26 @@ class Registry:
     def defer(self, *namespaces: str):
         self.deferred.update(namespaces)
 
-    def load_namespace(self, ns: str):
-        self.deferred.discard(ns)
+    def is_deferred(self, name_or_ns: str) -> bool:
+        return name_or_ns.split(".", 1)[0] in self.deferred
 
-    def openai_tools(self, exclude_ns: set[str] | None = None, only_tools: set[str] | None = None) -> list[dict]:
+    def namespace_schemas(self, ns: str) -> list[dict]:
+        """Full function schemas for one namespace, as returned to the model when it loads them."""
+        return [{"name": n, "description": self.schemas[n].get("description", ""), "parameters": self.schemas[n].get("parameters")}
+                for n in self.namespaces.get(ns, {}).get("functions", [])]
+
+    def openai_tools(self, exclude_ns: set[str] | None = None, only_tools: set[str] | None = None,
+                     loaded_ns: set[str] | None = None) -> list[dict]:
+        """The request's tool list: every non-deferred namespace, plus deferred ones this agent has loaded."""
         out = []
         for name, fn in self.schemas.items():
             ns = name.split(".", 1)[0]
             if only_tools is not None:
                 if name not in only_tools:
                     continue
-            elif ns in self.deferred or (exclude_ns and ns in exclude_ns):
+            elif exclude_ns and ns in exclude_ns:
+                continue
+            elif ns in self.deferred and ns not in (loaded_ns or set()):
                 continue
             params = fn.get("parameters") or {"type": "object", "properties": {}}
             out.append({"type": "function", "function": {
@@ -77,7 +92,10 @@ class Registry:
                 "parameters": params}})
         return out
 
-    def runtime_section(self, exclude_ns: set[str] | None = None, only_tools: set[str] | None = None) -> str:
+    def runtime_section(self, exclude_ns: set[str] | None = None, only_tools: set[str] | None = None,
+                        loaded_ns: set[str] | None = None) -> str:
+        """The tool index in the system prompt. Deferred namespaces list every function as a one-line stub
+        marked "deferred" (the marker never changes, even after loading, as Muse's prompt says)."""
         lines = ["## Runtime", "Tools available to you, by namespace. Call them by their dotted name."]
         if only_tools is not None:
             for name in sorted(only_tools):
@@ -87,12 +105,11 @@ class Registry:
         for ns, meta in self.namespaces.items():
             if exclude_ns and ns in exclude_ns:
                 continue
-            tag = " (deferred: call `tool_search.load_tool_namespace` to expand)" if ns in self.deferred else ""
-            lines.append(f"- `{ns}`: {meta['description']}{tag}")
-            if ns not in self.deferred:
-                for name in meta["functions"]:
-                    desc = (self.schemas[name].get("description") or "").split(". ")[0]
-                    lines.append(f"  - `{name}`: {desc}")
+            deferred = ns in self.deferred
+            lines.append(f"- `{ns}`: {meta['description']}" + (" (deferred namespace: load it with `tool_search.load_tool_namespace` before first use)" if deferred else ""))
+            for name in meta["functions"]:
+                desc = (self.schemas[name].get("description") or "").split(". ")[0][:160]
+                lines.append(f"  - `{name}`: {desc}" + (" (deferred)" if deferred else ""))
         return "\n".join(lines)
 
     def dispatch(self, wire_name: str, args: dict, ctx: dict | None = None) -> Any:

@@ -272,6 +272,16 @@ class Room:
                            on_text=self._on_text, on_event=self._on_event)
         self.agent.id = f"agent_root_{user}"
         self.agent.store = self.store
+        # deferred tool namespaces the root agent has loaded survive restarts with the transcript they belong to
+        self._loaded_path = self.home / ".runtime" / "loaded_tools.json"
+        try:
+            self.agent.loaded_ns = set(json.loads(self._loaded_path.read_text()))
+        except (OSError, ValueError):
+            self.agent.loaded_ns = set()
+        def _persist(ns: set[str]):
+            self._loaded_path.parent.mkdir(parents=True, exist_ok=True)
+            self._loaded_path.write_text(json.dumps(sorted(ns)))
+        self.agent.on_tools_loaded = _persist
         self._load_transcript()
         self._deliver_orig = self.agent.deliver
         self.agent.deliver = self._deliver  # type: ignore[method-assign]

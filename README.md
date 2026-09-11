@@ -49,6 +49,7 @@ Without those env vars the app shows a sign-in screen asking for the server URL 
 - [x] Core loop: streaming, tools, handoffs, compaction, subagents, background shell
 - [x] Memory retrieval: Qdrant + MiniLM + Jina reranker (`superapp/memory/retrieval.py`)
 - [x] Daemon with WebSocket streaming; Expo app in the Muse layout
+- [x] Lazy tool loading (Muse's deferred namespaces): artifact, feed, credentials, chat, wallet, channel ship as one-line stubs and load per agent via `tool_search.load_tool_namespace`; direct calls auto-load; the root agent's loads persist. Per-call prompt 52k -> 36k tokens (`superapp/tools/registry.py`)
 - [x] Onboarding: first launch asks the user's name, the agent's name and vibe, and what is on their plate; writes USER.md/IDENTITY.md and the agent opens the conversation (`/v1/onboarding`, `apps/mobile/src/screens/OnboardingScreen.tsx`)
 - [x] Google Calendar connector on the same Google sign-in: `hatch_gws_cli calendar` with `+agenda`, raw Calendar API v3 calls, approval on guest-notifying writes (`superapp/connectors/gws_cli.py`)
 - [x] Gmail connector: encrypted vault, OAuth connect flow, `bin/hatch_gws_cli` driving the ported skill, sends gated by approval cards (`superapp/connectors/`, `superapp/approvals.py`)
