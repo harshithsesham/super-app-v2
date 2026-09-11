@@ -12,7 +12,7 @@ export type FeedPost = { id: string; kicker: string; category: string; title: st
 export type Idea = { id: string; icon: string; title: string; body: string };
 export type Goal = { id: string; title: string; category: string; done: boolean; plan?: string[] };
 export type Approval = { id: string; kind: string; title: string; subtitle: string; details: { label: string; value: string }[]; decision: string | null };
-export type Connector = { provider: string; status: "connected" | "available"; configured: boolean; email: string | null };
+export type Connector = { provider: string; status: "connected" | "available"; configured: boolean; email: string | null; note?: string | null; last_synced_at?: number | null };
 export type BrowserTask = { task_id: string; title: string; status: string; status_title: string; url: string; screenshot?: string; question?: string | null };
 export type BrowserLive = {
   mode: "none" | "task" | "free"; task_id?: string; status?: string; status_title?: string; title?: string; question?: string | null;
@@ -88,6 +88,11 @@ export class Api {
   browserTasks() { return this.req<{ tasks: BrowserTask[]; cards: BrowserTask[] }>("/v1/browser/tasks"); }
   hub() { return this.req<Hub>("/v1/hub"); }
   voiceStatus() { return this.req<{ tts: boolean; voice_id: string }>("/v1/voice/status"); }
+  healthSync(payload: Record<string, unknown>) {
+    return this.req<{ ok: boolean; counts: { metrics: number; sessions: number; samples: number } }>("/v1/health/sync", { method: "POST", body: JSON.stringify(payload) });
+  }
+  healthStatus() { return this.req<{ synced: boolean; last_synced_at: number | null; categories: { name: string; record_count: number }[] }>("/v1/health/status"); }
+  healthRequests() { return this.req<{ requests: { id: string; start_date: string; end_date: string }[] }>("/v1/health/requests"); }
   browserLive() { return this.req<BrowserLive>("/v1/browser/live"); }
   browserOpen() { return this.req<BrowserLive>("/v1/browser/live/open", { method: "POST" }); }
   browserClose() { return this.req<{ closed: boolean }>("/v1/browser/live/close", { method: "POST" }); }

@@ -5,12 +5,15 @@ import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-nati
 import * as WebBrowser from "expo-web-browser";
 import { Pressable } from "../ui/Tap";
 import { BackIcon } from "../ui/Icons";
+import { BrandIcon } from "../ui/BrandIcon";
+import { Ionicons } from "@expo/vector-icons";
 import { C, R } from "../theme";
 import type { SavedSite, Api, Connector, Skill } from "../api";
+import { connectHealth, disconnectHealth } from "../health";
 
 // Providers with a real connect flow in the daemon today. Gmail and Google Calendar
 // share one Google sign-in; connecting either runs the same consent.
-const LIVE: Record<string, string> = { gmail: "gmail", "google-calendar": "google_calendar" };
+const LIVE: Record<string, string> = { gmail: "gmail", "google-calendar": "google_calendar", "apple-healthkit": "apple_healthkit" };
 
 const PRETTY: Record<string, string> = {
   gmail: "Gmail", "google-calendar": "Google Calendar", "google-contacts": "Google Contacts", "google-drive": "Google Drive",
@@ -20,7 +23,7 @@ const PRETTY: Record<string, string> = {
   "outlook-mail": "Outlook Mail", "outlook-calendar": "Outlook Calendar", "outlook-contacts": "Outlook Contacts",
   spotify: "Spotify", tessie: "Tessie", withings: "Withings", "philips-hue": "Philips Hue", printify: "Printify",
   ticketmaster: "Ticketmaster", duffel: "Flights (Duffel)", flightaware: "FlightAware", calendly: "Calendly",
-  messenger: "Messenger", threads: "Threads", "threads-messages": "Threads Messages", "apple-healthkit": "Apple Health",
+  messenger: "Messenger", threads: "Threads", "threads-messages": "Threads Messages", "apple-healthkit": "Health",
   "google-health-connect": "Health Connect",
 };
 const CONNECTOR_SKILLS = new Set(Object.keys(PRETTY));
@@ -45,6 +48,14 @@ export function ConnectorsScreen({ api, onBack, onOpenBrowser }: { api: Api; onB
     const provider = LIVE[name];
     if (!provider) { Alert.alert("Coming soon", "This connector is not wired up yet."); return; }
     setBusy(true);
+    if (name === "apple-healthkit") {
+      try {
+        const r = await connectHealth(api);
+        if (!r.ok) Alert.alert("Couldn't connect Apple Health", r.message ?? "Unknown error");
+        await load();
+      } finally { setBusy(false); }
+      return;
+    }
     try {
       const { auth_url } = await api.gmailAuthUrl();
       const res = await WebBrowser.openAuthSessionAsync(auth_url, "superapp://gmail-connected");   // one consent covers Gmail + Calendar
@@ -58,11 +69,13 @@ export function ConnectorsScreen({ api, onBack, onOpenBrowser }: { api: Api; onB
   const disconnect = useCallback((name: string) => {
     Alert.alert(`Disconnect ${PRETTY[name] ?? name}?`, "The saved sign-in will be removed.", [
       { text: "Cancel", style: "cancel" },
-      { text: "Disconnect", style: "destructive", onPress: async () => { try { await api.gmailDisconnect(); await load(); } catch {} } },
+      { text: "Disconnect", style: "destructive", onPress: async () => { try { if (name === "apple-healthkit") await disconnectHealth(); else await api.gmailDisconnect(); await load(); } catch {} } },
     ]);
   }, [api, load]);
 
+  // catalog names come from SKILL.md frontmatter (snake_case); the tables here are kebab-case
   const rows = useMemo(() => skills
+    .map((s) => ({ ...s, name: s.name.replace(/_/g, "-") }))
     .filter((s) => CONNECTOR_SKILLS.has(s.name))
     .map((s) => ({ ...s, label: PRETTY[s.name] ?? s.name }))
     .filter((s) => s.label.toLowerCase().includes(q.toLowerCase()))
@@ -70,15 +83,15 @@ export function ConnectorsScreen({ api, onBack, onOpenBrowser }: { api: Api; onB
   const connected = rows.filter((r) => r.status === "connected");
   const available = rows.filter((r) => r.status !== "connected");
 
-  const emailFor = (name: string) => live.find((c) => c.provider === LIVE[name])?.email ?? null;
+  const emailFor = (name: string) => { const c = live.find((x) => x.provider === LIVE[name]); return c?.email ?? c?.note ?? null; };
   const Row = ({ r, last, action }: { r: (typeof rows)[number]; last: boolean; action?: string }) => (
-    <Pressable style={[s.row, !last && s.rowBorder]} onPress={() => (action ? connect(r.name) : disconnect(r.name))}>
-      <View style={s.logo}><Text style={s.logoText}>{r.label.slice(0, 1)}</Text></View>
+    <Pressable style={[s.row, !last && s.rowBorder]} feel="control" onPress={() => (action ? connect(r.name) : disconnect(r.name))}>
+      <BrandIcon name={r.name} label={r.label} />
       <View style={{ flex: 1 }}>
         <Text style={s.name}>{r.label}</Text>
-        {!action && emailFor(r.name) ? <Text style={s.email}>{emailFor(r.name)}</Text> : null}
+        {!action && emailFor(r.name) ? <Text style={s.email} numberOfLines={1}>{emailFor(r.name)}</Text> : null}
       </View>
-      {action ? <Text style={s.connect}>{busy && LIVE[r.name] ? "…" : action}</Text> : <Text style={s.chev}>›</Text>}
+      {busy && action && LIVE[r.name] ? <Text style={s.chev}>…</Text> : <Ionicons name="chevron-forward" size={18} color={C.muted} />}
     </Pressable>
   );
 
@@ -89,43 +102,50 @@ export function ConnectorsScreen({ api, onBack, onOpenBrowser }: { api: Api; onB
         <Text style={s.title}>Connectors</Text>
         <View style={{ width: 44 }} />
       </View>
-      <ScrollView contentContainerStyle={s.list}>
+      <ScrollView contentContainerStyle={s.list} keyboardShouldPersistTaps="handled">
         <View style={s.search}>
-          <Text style={{ fontSize: 16, color: C.muted }}>⌕</Text>
-          <TextInput style={s.searchInput} value={q} onChangeText={setQ} placeholder="Search connectors" placeholderTextColor={C.muted} />
-        </View>
-        <Text style={s.section}>Browser</Text>
-        <View style={s.card}>
-          <View style={[s.row, s.rowBorder]}>
-            <View style={s.logo}><Text style={{ fontSize: 20 }}>🌐</Text></View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.name}>Muse's browser</Text>
-              <Text style={s.email}>Sign into sites here once; it stays signed in for tasks.</Text>
-            </View>
-            <Pressable feel="control" onPress={onOpenBrowser}><Text style={s.connect}>Open</Text></Pressable>
-          </View>
-          {sites.length ? sites.slice(0, 12).map((site, i) => (
-            <View key={site.site} style={[s.row, i < Math.min(sites.length, 12) - 1 && s.rowBorder]}>
-              <View style={{ flex: 1 }}>
-                <Text style={s.name}>{site.site}</Text>
-                <Text style={s.email}>{site.cookies} cookie{site.cookies === 1 ? "" : "s"}{site.last_used_at ? ` · used ${new Date(site.last_used_at * 1000).toLocaleDateString()}` : ""}</Text>
-              </View>
-              <Pressable feel="control" onPress={() => Alert.alert(`Forget ${site.site}?`, "Muse's browser will be signed out of this site.", [
-                { text: "Cancel", style: "cancel" },
-                { text: "Forget", style: "destructive", onPress: async () => { try { const r = await api.browserForget(site.site); setSites(r.sites); } catch {} } },
-              ])}><Text style={s.connect}>Forget</Text></Pressable>
-            </View>
-          )) : <Text style={s.none}>No saved sign-ins yet.</Text>}
+          <Ionicons name="search" size={17} color={C.muted} />
+          <TextInput style={s.searchInput} value={q} onChangeText={setQ} placeholder="Search connectors" placeholderTextColor={C.muted}
+            autoCorrect={false} autoCapitalize="none" clearButtonMode="while-editing" />
         </View>
         <Text style={s.section}>Connected</Text>
         <View style={s.card}>
-          {connected.length ? connected.map((r, i) => <Row key={r.name} r={r} last={i === connected.length - 1} />)
-            : <Text style={s.none}>Nothing connected yet.</Text>}
+          {"browser".includes(q.toLowerCase()) ? (
+            <Pressable style={[s.row, connected.length ? s.rowBorder : null]} feel="control" onPress={onOpenBrowser}>
+              <BrandIcon name="browser" />
+              <View style={{ flex: 1 }}>
+                <Text style={s.name}>Browser</Text>
+                {sites.length ? <Text style={s.email} numberOfLines={1}>{sites.length} saved sign-in{sites.length === 1 ? "" : "s"}</Text> : null}
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={C.muted} />
+            </Pressable>
+          ) : null}
+          {connected.map((r, i) => <Row key={r.name} r={r} last={i === connected.length - 1} />)}
         </View>
         <Text style={s.section}>Available</Text>
         <View style={s.card}>
-          {available.map((r, i) => <Row key={r.name} r={r} last={i === available.length - 1} action="Connect" />)}
+          {available.length ? available.map((r, i) => <Row key={r.name} r={r} last={i === available.length - 1} action="Connect" />)
+            : <Text style={s.none}>Nothing matches.</Text>}
         </View>
+        {sites.length ? (
+          <>
+            <Text style={s.section}>Browser sign-ins</Text>
+            <View style={s.card}>
+              {sites.slice(0, 12).map((site, i) => (
+                <View key={site.site} style={[s.row, i < Math.min(sites.length, 12) - 1 && s.rowBorder]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.name}>{site.site}</Text>
+                    <Text style={s.email}>{site.cookies} cookie{site.cookies === 1 ? "" : "s"}{site.last_used_at ? ` · used ${new Date(site.last_used_at * 1000).toLocaleDateString()}` : ""}</Text>
+                  </View>
+                  <Pressable feel="control" onPress={() => Alert.alert(`Forget ${site.site}?`, "Muse's browser will be signed out of this site.", [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Forget", style: "destructive", onPress: async () => { try { const r = await api.browserForget(site.site); setSites(r.sites); } catch {} } },
+                  ])}><Text style={s.connect}>Forget</Text></Pressable>
+                </View>
+              ))}
+            </View>
+          </>
+        ) : null}
       </ScrollView>
     </View>
   );

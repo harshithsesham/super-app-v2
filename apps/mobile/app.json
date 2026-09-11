@@ -12,7 +12,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.harshith.superapp",
       "appleTeamId": "JAUSPN67UY",
-      "buildNumber": "66",
+      "buildNumber": "67",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
@@ -47,6 +47,14 @@
         {
           "icon": "./assets/icon.png",
           "color": "#8F7CFF"
+        }
+      ],
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "Super App reads your Health data so your assistant can answer questions about your activity, sleep, and workouts. It syncs only to your own private agent.",
+          "NSHealthUpdateUsageDescription": "Super App does not write to Health today; this permission is reserved for saving workouts you ask your assistant to log.",
+          "background": false
         }
       ]
     ],

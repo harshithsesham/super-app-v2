@@ -21,7 +21,7 @@ def _frontmatter(p: pathlib.Path) -> dict:
 
 
 # skill directory -> vault provider whose presence means "connected"
-PROVIDER_FOR_SKILL = {"gmail": "gmail", "google-calendar": "google_calendar"}
+PROVIDER_FOR_SKILL = {"gmail": "gmail", "google-calendar": "google_calendar", "apple-healthkit": "apple_healthkit"}
 
 
 def catalog(home: pathlib.Path | None = None) -> list[dict]:
@@ -32,8 +32,14 @@ def catalog(home: pathlib.Path | None = None) -> list[dict]:
         tok = vault.load("gmail", home or CONFIG.home) or {}
         if CALENDAR_SCOPE in (tok.get("scopes") or []):
             connected.add("google_calendar")
-    statuses = {k.replace("_", "-"): ("connected" if PROVIDER_FOR_SKILL.get(k.replace("_", "-")) in connected else "available")
-                for k, v in (CONFIG.skills_yaml.get("entries") or {}).items()}
+    try:
+        from ..connectors import health as _health
+        if _health.status(home or CONFIG.home, "healthkit")["synced"]:
+            connected.add("apple_healthkit")
+    except Exception:  # noqa: BLE001
+        pass
+    # status is keyed on the skill directory so every connector skill gets one, listed in skills.yaml or not
+    statuses = {d: ("connected" if p in connected else "available") for d, p in PROVIDER_FOR_SKILL.items()}
     out = []
     for skill_md in sorted(CONFIG.skills_dir.rglob("SKILL.md")):
         rel = skill_md.parent.relative_to(CONFIG.skills_dir).as_posix()

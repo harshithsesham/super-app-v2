@@ -8,7 +8,7 @@ import { InstrumentSans_400Regular, InstrumentSans_600SemiBold } from "@expo-goo
 import { InstrumentSerif_400Regular } from "@expo-google-fonts/instrument-serif";
 import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, AppState, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { Pressable } from "./src/ui/Tap";
 import { Avatar } from "./src/ui/Avatar";
@@ -26,6 +26,7 @@ import { SignInScreen } from "./src/screens/SignInScreen";
 import { registerForPush, useNotificationTaps } from "./src/push";
 import { OnboardingScreen } from "./src/screens/OnboardingScreen";
 import { BrowserScreen } from "./src/screens/BrowserScreen";
+import { syncHealthIfConnected } from "./src/health";
 import { HubScreen } from "./src/screens/HubScreen";
 import { ChatScreen, describe, statusTitle, type LiveTurn } from "./src/screens/ChatScreen";
 import { IdeasScreen } from "./src/screens/IdeasScreen";
@@ -192,11 +193,20 @@ function App() {
     if (auth === "ready" && api) registerForPush(api);
   }, [auth, api]);
 
+  // Apple Health: a quiet incremental sync whenever the app comes to the foreground
+  useEffect(() => {
+    if (auth !== "ready" || !api) return;
+    syncHealthIfConnected(api);
+    const sub = AppState.addEventListener("change", (st) => { if (st === "active") syncHealthIfConnected(api); });
+    return () => sub.remove();
+  }, [auth, api]);
+
   useNotificationTaps(useCallback((data: Record<string, unknown>) => {
     setMenu(false); setActivity(false);
     setTab(data.tab === "chat" || data.approval || data.browser ? "chat" : "hub");
     if (typeof data.browser === "string") { setBrowserView({ mode: "task", taskId: data.browser }); setPage("browser"); } else setPage(null);
-  }, []));
+    if (data.health_sync && api) syncHealthIfConnected(api);
+  }, [api]));
 
   const decide = useCallback(async (id: string, decision: "allow" | "deny") => {
     if (!api) return;

@@ -159,3 +159,11 @@ fly secrets set -a muse-gateway APNS_KEY_ID=<key id> APNS_TEAM_ID=JAUSPN67UY APN
 
 Without the secrets the gateway logs a dry run for every notification it would have sent (`push: dry run ...`).
 TestFlight builds use Apple's production APNs host; a local Xcode build registers with `env: sandbox`.
+
+## Apple Health
+
+Device-synced, no account: the app asks for HealthKit read access (Connectors → Apple Health), syncs the last 30 days,
+then the last 3 days on every foreground plus any ranges the agent queued with `health-cli backfill` (which also sends a
+push asking the user to open the app). Data lives under `<home>/.device/health/healthkit/` as JSON lines; the cell's
+`/v1/health/sync`, `/v1/health/status`, `/v1/health/requests` serve the app. The App ID needs the HealthKit capability
+(automatic signing adds it with the entitlement from the config plugin).

@@ -1,0 +1,5 @@
+#!/bin/sh
+# The Apple Health command the apple-healthkit skill calls. Reads data the phone
+# synced into the agent's home (~/.device/health/); never contacts the device.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" exec "$ROOT/.venv/bin/python" -m superapp.connectors.health_cli "$@"

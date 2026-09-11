@@ -35,7 +35,7 @@ from . import auth, db, hub, voice
 from .approvals import Approval, ApprovalStore
 from .scheduler import tools as scheduler_tools  # noqa: F401  registers cron.*, hooks.*, muse.nothing_to_do
 from .scheduler.engine import Engine
-from .connectors import vault
+from .connectors import vault, health as health_store
 from .connectors.gmail import CALENDAR_SCOPE, GmailClient, configured as gmail_configured
 from .cells import gateway
 
@@ -620,6 +620,48 @@ def _cookie_host(r: Room):
     return browser_live.current(r.home)
 
 
+# ------------------------------------------------------------ apple health ----
+@app.post("/v1/health/sync")
+def health_sync(body: dict, user: str = Depends(current_user)):
+    """The phone uploads HealthKit rollups, sessions, and samples for a date range; merged by key on disk."""
+    r = room_for(user)
+    b = body or {}
+    provider = str(b.get("provider", "healthkit"))
+    if provider not in health_store.PROVIDERS:
+        raise HTTPException(400, f"unknown provider {provider}")
+    counts = health_store.ingest(r.home, provider, b)
+    first = not (b.get("range") or {}).get("incremental")
+    if first and any(counts.values()):
+        r.agent.deliver(f"[Connector] Apple Health synced from the user's iPhone: {counts['metrics']} days of metrics, "
+                        f"{counts['sessions']} sleep/workout sessions, {counts['samples']} samples on disk. The `apple_healthkit` skill (health-cli) can read them.")
+    return {"ok": True, "counts": counts, "status": health_store.status(r.home, provider)}
+
+
+@app.get("/v1/health/status")
+def health_status(user: str = Depends(current_user), provider: str = "healthkit"):
+    return health_store.status(room_for(user).home, provider)
+
+
+@app.get("/v1/health/requests")
+def health_requests(user: str = Depends(current_user), provider: str = "healthkit"):
+    """Ranges the agent asked the phone to backfill; the app fulfils them on its next sync."""
+    return {"requests": health_store.read_meta(room_for(user).home, provider).get("requests", [])}
+
+
+@app.post("/internal/health/backfill")
+def health_backfill(body: dict, x_internal_token: str = Header("")):
+    """health-cli queued a backfill: nudge the phone to open the app and sync that range."""
+    if not hmac.compare_digest(x_internal_token, INTERNAL_TOKEN):
+        raise HTTPException(403, "bad internal token")
+    r = room_for_home(str((body or {}).get("home", "")))
+    if not r:
+        raise HTTPException(404, "no agent for that home")
+    req = (body or {}).get("request") or {}
+    r.notify("Muse needs a Health sync", f"Open the app to sync Apple Health for {req.get('start_date')} to {req.get('end_date')}.",
+             {"tab": "hub", "health_sync": True}, thread_id="health")
+    return {"ok": True}
+
+
 @app.get("/v1/browser/logins")
 def browser_logins(user: str = Depends(current_user)):
     r = room_for(user)
@@ -681,12 +723,16 @@ def connectors(user: str = Depends(current_user)):
     tok = vault.load("gmail", r.home) or {}
     have_gmail = bool(tok)
     have_cal = have_gmail and CALENDAR_SCOPE in (tok.get("scopes") or [])
+    hk = health_store.status(r.home, "healthkit")
     return {"connectors": [
         {"provider": "gmail", "status": "connected" if have_gmail else "available", "configured": gmail_configured(),
          "email": tok.get("email") if have_gmail else None},
         {"provider": "google_calendar", "status": "connected" if have_cal else "available", "configured": gmail_configured(),
          "email": tok.get("email") if have_cal else None, "connect_via": "gmail",
          "note": None if have_cal or not have_gmail else "Reconnect Google to add calendar access."},
+        {"provider": "apple_healthkit", "status": "connected" if hk.get("synced") else "available", "configured": True,
+         "email": None, "connect_via": "device", "last_synced_at": hk.get("last_synced_at"),
+         "note": f"{sum(c['record_count'] for c in hk['categories'] if c['name'] == 'daily-metrics')} days synced" if hk.get("synced") else "Syncs from this iPhone."},
     ]}
 
 
