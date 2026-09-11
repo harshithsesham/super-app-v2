@@ -12,10 +12,17 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.harshith.superapp",
       "appleTeamId": "JAUSPN67UY",
-      "buildNumber": "56",
+      "buildNumber": "57",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ],
+        "NSPhotoLibraryUsageDescription": "Super App lets you attach photos from your library to share with your assistant.",
+        "NSPhotoLibraryAddUsageDescription": "Super App can save images your assistant produces to your photo library.",
+        "NSCameraUsageDescription": "Super App can take a photo to share with your assistant.",
+        "NSMicrophoneUsageDescription": "Super App uses the microphone so you can talk to your assistant.",
+        "NSSpeechRecognitionUsageDescription": "Super App transcribes your voice so your assistant can respond."
       }
     },
     "android": {
