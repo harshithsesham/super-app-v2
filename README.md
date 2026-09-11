@@ -55,7 +55,8 @@ Without those env vars the app shows a sign-in screen asking for the server URL 
 - [ ] Browser credential grants and takeover
 - [x] Persistence on the Muse schema: one Postgres database per user, transcript/tool/compaction/subagent/browser rows, restart checkpoints and recovery (`superapp/db.py`)
 - [x] Scheduler: cron jobs and event hooks with the captured tool contracts, worker roles, system jobs (hourly memory upkeep, daily brief) (`superapp/scheduler/`)
-- [ ] Gmail watch hook, proactive push notifications
+- [x] Push notifications: APNs direct from the gateway, triggered by job results, hooks, and approvals when the app is closed (`superapp/cells/apns.py`, `apps/mobile/src/push.ts`)
+- [ ] Gmail watch hook
 - [ ] Sentinel-style tool-call auditor (prompt is in `superapp/prompts/blocks/sentinel/`)
 - [x] Deployed next to the existing API on the AWS box (`deploy/DEPLOY.md`)
 - [x] Google sign-in (`superapp/auth.py`)

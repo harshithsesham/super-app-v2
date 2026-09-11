@@ -217,12 +217,16 @@ class Agent:
         tool_calls = [calls[i] for i in sorted(calls)]
         for tc in tool_calls:
             tc["id"] = tc["id"] or f"call_{uuid.uuid4().hex[:8]}"
-            # the API rejects any later request whose history holds non-JSON arguments, so never let one in
-            raw = tc["function"]["arguments"] or "{}"
+            # the API rejects any later request whose history holds non-JSON (or empty) arguments, so
+            # normalise every call to a JSON object before it enters the transcript
+            raw = (tc["function"]["arguments"] or "").strip() or "{}"
             try:
-                json.loads(raw)
+                parsed = json.loads(raw)
             except json.JSONDecodeError:
-                tc["function"]["arguments"] = json.dumps({"_invalid_arguments": raw[:4000]})
+                parsed = {"_invalid_arguments": raw[:4000]}
+            if not isinstance(parsed, dict):
+                parsed = {"_invalid_arguments": raw[:4000]}
+            tc["function"]["arguments"] = json.dumps(parsed)
         return "".join(content_parts), tool_calls
 
     def _run_tool(self, tc: dict) -> str:

@@ -81,6 +81,9 @@ export class Api {
   hub() { return this.req<Hub>("/v1/hub"); }
   voiceStatus() { return this.req<{ tts: boolean; voice_id: string }>("/v1/voice/status"); }
   stopBrowserTask(id: string) { return this.req<{ task_id: string }>(`/v1/browser/tasks/${id}/stop`, { method: "POST" }); }
+  registerPush(token: string, platform: "ios" | "android", env: "production" | "sandbox") {
+    return this.req<{ registered: boolean; devices?: number }>("/v1/push/register", { method: "POST", body: JSON.stringify({ token, platform, env }) });
+  }
   gmailAuthUrl() { return this.req<{ auth_url: string }>("/v1/gmail/auth-url"); }
   gmailDisconnect() { return this.req<{ removed: boolean }>("/v1/gmail/disconnect", { method: "POST" }); }
   fileUrl(path: string) { return `${this.session.url}/v1/files/${encodeURI(path)}`; }

@@ -139,3 +139,21 @@ scheduled reminder, delivery, and sleep again.
 4. Cut over: in `/opt/super-app/deploy/Caddyfile` change the `/muse/*` upstream from `muse-daemon:18792` to
    `https://muse-gateway.fly.dev` (with `header_up Host muse-gateway.fly.dev`), reload Caddy, then stop `muse-daemon`.
    The app keeps using `https://app.nutrishiksha.com/muse`, so Google redirect URIs stay valid.
+
+## Push notifications
+
+No third-party relay: the app registers its raw APNs device token with the gateway (`POST /v1/push/register`, stored in
+`<HOME_ROOT>/.push.json`), and the gateway talks to Apple directly over HTTP/2 with an ES256 provider token
+(`superapp/cells/apns.py`). A cell asks the gateway to notify its user (`POST /internal/cells/notify`, cell token) when the
+agent speaks on its own with no app attached: a scheduled job result, a hook, a finished background task, or an approval
+card. Dead tokens are dropped on Apple's `BadDeviceToken`/`Unregistered`.
+
+Gateway secrets (an APNs auth key from the Apple developer portal, Keys → Apple Push Notifications service):
+
+```bash
+fly secrets set -a muse-gateway APNS_KEY_ID=<key id> APNS_TEAM_ID=JAUSPN67UY APNS_BUNDLE_ID=com.harshith.superapp \
+  APNS_KEY_P8="$(cat ~/Downloads/AuthKey_<key id>.p8)"
+```
+
+Without the secrets the gateway logs a dry run for every notification it would have sent (`push: dry run ...`).
+TestFlight builds use Apple's production APNs host; a local Xcode build registers with `env: sandbox`.

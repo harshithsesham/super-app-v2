@@ -44,7 +44,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
 # Only the headless shell of Chromium: the worker never runs headed. Models are
 # baked so a fresh cell never downloads on first boot.
 RUN python -m venv .venv && ./.venv/bin/pip install --no-cache-dir -e ".[memory,server]" \
-    && ./.venv/bin/pip install --no-cache-dir httpx cryptography websockets playwright croniter "psycopg[binary]" psycopg_pool \
+    && ./.venv/bin/pip install --no-cache-dir httpx cryptography websockets playwright croniter "psycopg[binary]" psycopg_pool h2 \
     && ./.venv/bin/playwright install --with-deps --only-shell chromium \
     && ./.venv/bin/python -c "\
 from fastembed import TextEmbedding, SparseTextEmbedding; \

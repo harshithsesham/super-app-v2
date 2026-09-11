@@ -12,7 +12,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.harshith.superapp",
       "appleTeamId": "JAUSPN67UY",
-      "buildNumber": "61",
+      "buildNumber": "62",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
@@ -23,6 +23,9 @@
         "NSCameraUsageDescription": "Super App can take a photo to share with your assistant.",
         "NSMicrophoneUsageDescription": "Super App uses the microphone so you can talk to your assistant.",
         "NSSpeechRecognitionUsageDescription": "Super App transcribes your voice so your assistant can respond."
+      },
+      "entitlements": {
+        "aps-environment": "production"
       }
     },
     "android": {
@@ -37,6 +40,13 @@
         {
           "microphonePermission": "Your agent listens while you talk to it.",
           "speechRecognitionPermission": "Your spoken words are transcribed on this device."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#8F7CFF"
         }
       ]
     ],

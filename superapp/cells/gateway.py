@@ -17,6 +17,7 @@ import httpx
 import websockets
 from cryptography.fernet import Fernet
 from .fly import FlyMachines, FlyError
+from .apns import APNs
 
 CELL_PORT = 18792
 # What a cell needs from the gateway's environment. Secrets travel once, at machine creation.
@@ -50,6 +51,9 @@ class Cells:
         self._failed: dict[str, tuple[float, str]] = {}   # user -> (when, why); recent failures answer fast
         self.retry_after = int(os.environ.get("SUPERAPP_CELL_RETRY_SECS", "30"))
         self.http = httpx.AsyncClient(timeout=httpx.Timeout(600, connect=15))
+        self.push_path = home_root / ".push.json"
+        self.push: dict[str, list[dict]] = json.loads(self.push_path.read_text()) if self.push_path.exists() else {}
+        self.apns = APNs()
         threading.Thread(target=self._wake_loop, daemon=True, name="cell-wake").start()
 
     # ----------------------------------------------------------- registry --
@@ -150,6 +154,42 @@ class Cells:
                 time.sleep(1)
             raise FlyError(f"cell for {user} did not become healthy in {timeout}s")
 
+    # --------------------------------------------------------------- push --
+    def register_push(self, user: str, token: str, platform: str, env: str) -> int:
+        rows = [r for r in self.push.get(user, []) if r["token"] != token]
+        rows.append({"token": token, "platform": platform, "env": env if env in ("production", "sandbox") else "production",
+                     "updated_at": time.time()})
+        self.push[user] = rows[-5:]   # a person has a handful of devices, not a fleet
+        self._save_push()
+        return len(self.push[user])
+
+    def unregister_push(self, user: str, token: str) -> bool:
+        before = len(self.push.get(user, []))
+        self.push[user] = [r for r in self.push.get(user, []) if r["token"] != token]
+        self._save_push()
+        return len(self.push[user]) < before
+
+    def _save_push(self):
+        tmp = self.push_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.push, indent=1))
+        tmp.replace(self.push_path)
+
+    def notify(self, user: str, token: str, title: str, body: str, data: dict | None = None, thread_id: str | None = None) -> dict:
+        """A cell asks the gateway to reach the person: every registered device, dead tokens dropped."""
+        cell = self.cells.get(user)
+        if not cell or not secrets.compare_digest(token, cell["token"]):
+            raise PermissionError("unknown cell")
+        results = []
+        for row in list(self.push.get(user, [])):
+            if row.get("platform") != "ios":
+                continue
+            res = self.apns.send(row["token"], row.get("env", "production"), title, body, data, thread_id)
+            if res == "gone":
+                self.unregister_push(user, row["token"])
+            results.append(res)
+        print(f"push: {user} {title!r} -> {results or 'no devices'}", flush=True)
+        return {"devices": len(results), "results": results}
+
     # ------------------------------------------------------------- waking --
     def report_state(self, user: str, token: str, state: dict) -> bool:
         cell = self.cells.get(user)
@@ -195,7 +235,8 @@ class Cells:
         return self.resolve_user(token)
 
     def routes(self, path: str) -> bool:
-        return path.startswith("/v1/") and not path.startswith("/v1/auth/") and path != "/v1/ws"
+        return (path.startswith("/v1/") and not path.startswith("/v1/auth/") and not path.startswith("/v1/push/")
+                and path != "/v1/ws")
 
     async def handle_http(self, scope, receive, send):
         user = self.user_for_scope(scope)

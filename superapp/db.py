@@ -164,7 +164,16 @@ class Store:
         summary, tail = [], []
         for p, name in rows:
             try:
-                (summary if name == "compaction_summary" else tail).append(json.loads(p))
+                m = json.loads(p)
+                for tc in m.get("tool_calls") or []:   # rows written before arguments were normalised
+                    fn = tc.get("function") or {}
+                    try:
+                        ok = isinstance(json.loads(fn.get("arguments") or ""), dict)
+                    except json.JSONDecodeError:
+                        ok = False
+                    if not ok:
+                        fn["arguments"] = "{}"
+                (summary if name == "compaction_summary" else tail).append(m)
             except (TypeError, json.JSONDecodeError):
                 continue
         return summary[-1:] + tail

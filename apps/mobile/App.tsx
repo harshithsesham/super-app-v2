@@ -23,6 +23,7 @@ import {
 import { ApprovalCard } from "./src/ui/ApprovalCard";
 import { BrowserCard } from "./src/ui/BrowserCard";
 import { SignInScreen } from "./src/screens/SignInScreen";
+import { registerForPush, useNotificationTaps } from "./src/push";
 import { HubScreen } from "./src/screens/HubScreen";
 import { ChatScreen, describe, statusTitle, type LiveTurn } from "./src/screens/ChatScreen";
 import { IdeasScreen } from "./src/screens/IdeasScreen";
@@ -175,6 +176,15 @@ function App() {
     api.approvals().then((r) => setApprovals(r.approvals)).catch(() => {});
     api.voiceStatus().then((v) => setCanSpeak(v.tts)).catch(() => setCanSpeak(false));
   }, [connection, api]);
+
+  useEffect(() => {
+    if (auth === "ready" && api) registerForPush(api);
+  }, [auth, api]);
+
+  useNotificationTaps(useCallback((data: Record<string, unknown>) => {
+    setPage(null); setMenu(false); setActivity(false);
+    setTab(data.tab === "chat" || data.approval ? "chat" : "hub");
+  }, []));
 
   const decide = useCallback(async (id: string, decision: "allow" | "deny") => {
     if (!api) return;

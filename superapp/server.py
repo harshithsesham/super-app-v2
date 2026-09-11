@@ -211,6 +211,38 @@ def _do_import(body: bytes) -> dict:
     return out
 
 
+@app.post("/v1/push/register")
+def push_register(body: dict, user: str = Depends(current_user)):
+    """The app registers its device token here (gateway-side; a cell never sees tokens)."""
+    if not CELLS:
+        return {"registered": False, "reason": "push is handled by the gateway"}
+    token = str((body or {}).get("token", "")).strip()
+    if not token:
+        raise HTTPException(400, "token required")
+    n = CELLS.register_push(user, token, str((body or {}).get("platform", "ios")), str((body or {}).get("env", "production")))
+    return {"registered": True, "devices": n, "apns": CELLS.apns.configured()}
+
+
+@app.post("/v1/push/unregister")
+def push_unregister(body: dict, user: str = Depends(current_user)):
+    if not CELLS:
+        return {"removed": False}
+    return {"removed": CELLS.unregister_push(user, str((body or {}).get("token", "")))}
+
+
+@app.post("/internal/cells/notify")
+def cell_notify(body: dict, x_cell_token: str = Header("")):
+    """A cell reports something worth a notification: a finished job, an approval, a proactive message."""
+    if not CELLS:
+        raise HTTPException(400, "not a gateway")
+    b = body or {}
+    try:
+        return CELLS.notify(str(b.get("user", "")), x_cell_token, str(b.get("title", "")), str(b.get("body", "")),
+                            b.get("data") or {}, b.get("thread_id"))
+    except PermissionError:
+        raise HTTPException(403, "unknown cell")
+
+
 @app.get("/internal/cells")
 def cells_list(x_internal_token: str = Header("")):
     if not hmac.compare_digest(x_internal_token, INTERNAL_TOKEN):
@@ -244,7 +276,8 @@ class Room:
         self._deliver_orig = self.agent.deliver
         self.agent.deliver = self._deliver  # type: ignore[method-assign]
         self.approvals = ApprovalStore(
-            on_new=lambda a: self._send({"type": "approval", "approval": a.public()}),
+            on_new=lambda a: (self._send({"type": "approval", "approval": a.public()}),
+                              self.notify("Needs your approval", a.title, {"tab": "chat", "approval": a.id}, thread_id="approvals")),
             on_resolved=lambda a: self._send({"type": "approval_resolved", "id": a.id, "decision": a.decision}))
         self.agent.approvals = self.approvals
         self.browser_tasks: dict[str, dict] = {}
@@ -344,6 +377,20 @@ class Room:
         if self.agent.status == "idle":
             threading.Thread(target=self.run_turn, args=(None,), daemon=True).start()
 
+    def notify(self, title: str, body: str, data: dict | None = None, thread_id: str | None = None):
+        """Reach the person on their phone when nobody is looking at the app. Only in a cell, and only when
+        no socket is attached: an open app already shows everything live."""
+        if self.sockets or not CELL_USER or not os.environ.get("SUPERAPP_GATEWAY_URL"):
+            return
+        def go():
+            try:
+                httpx.post(os.environ["SUPERAPP_GATEWAY_URL"].rstrip("/") + "/internal/cells/notify",
+                           json={"user": CELL_USER, "title": title, "body": body, "data": data or {}, "thread_id": thread_id},
+                           headers={"X-Cell-Token": CELL_TOKEN or ""}, timeout=15)
+            except Exception as e:  # noqa: BLE001
+                self.events.append({"ts": time.time(), "kind": "push_error", "data": {"error": f"{type(e).__name__}: {e}"}})
+        threading.Thread(target=go, daemon=True).start()
+
     # turns
     def run_turn(self, text: str | None):
         if text is not None:
@@ -356,6 +403,10 @@ class Room:
             final = ""
         self._save_transcript()
         self._send({"type": "turn_end", "text": final, "silent": bool(self.agent.silent_turn)})
+        if text is None and final and not self.agent.silent_turn:
+            # the agent spoke on its own (a job result, a hook, a finished background task): tell the phone
+            name = self.agent.assistant_name()
+            self.notify("Muse" if name == "your assistant" else name, final.strip().splitlines()[0][:200], {"tab": "chat"}, thread_id="chat")
         return final
 
     def history(self) -> list[dict]:
