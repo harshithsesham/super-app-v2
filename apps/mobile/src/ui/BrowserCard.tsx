@@ -7,7 +7,7 @@ import { Pressable } from "./Tap";
 import { C, R } from "../theme";
 import type { BrowserTask } from "../api";
 
-export function BrowserCard({ task, onStop }: { task: BrowserTask; onStop?: () => void }) {
+export function BrowserCard({ task, onStop, onOpen }: { task: BrowserTask; onStop?: () => void; onOpen?: (taskId: string) => void }) {
   const [open, setOpen] = useState(false);
   const live = task.status === "running" || task.status === "queued";
   const shot = task.screenshot ? { uri: `data:image/jpeg;base64,${task.screenshot}` } : null;
@@ -24,8 +24,8 @@ export function BrowserCard({ task, onStop }: { task: BrowserTask; onStop?: () =
       </View>
       {shot ? <Image source={shot} style={s.shot} resizeMode="cover" /> : <View style={[s.shot, s.blank]} />}
       <View style={s.actions}>
-        <Pressable style={s.open} feel="control" onPress={() => setOpen(true)}>
-          <Text style={s.openText}>Open browser</Text>
+        <Pressable style={s.open} feel="control" onPress={() => (onOpen ? onOpen(task.task_id) : setOpen(true))}>
+          <Text style={s.openText}>{task.status === "needs_user" ? "Take over" : live ? "Watch or take over" : "Open browser"}</Text>
         </Pressable>
         {live && onStop ? (
           <Pressable style={s.stop} feel="control" onPress={onStop}><Text style={s.stopText}>Stop</Text></Pressable>

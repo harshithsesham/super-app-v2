@@ -25,6 +25,7 @@ import { BrowserCard } from "./src/ui/BrowserCard";
 import { SignInScreen } from "./src/screens/SignInScreen";
 import { registerForPush, useNotificationTaps } from "./src/push";
 import { OnboardingScreen } from "./src/screens/OnboardingScreen";
+import { BrowserScreen } from "./src/screens/BrowserScreen";
 import { HubScreen } from "./src/screens/HubScreen";
 import { ChatScreen, describe, statusTitle, type LiveTurn } from "./src/screens/ChatScreen";
 import { IdeasScreen } from "./src/screens/IdeasScreen";
@@ -37,7 +38,7 @@ import { MenuSheet } from "./src/screens/MenuSheet";
 
 const extra = (Constants.expoConfig?.extra ?? {}) as { apiUrl?: string; apiToken?: string };
 type Tab = "hub" | "chat" | "ideas" | "goals" | "library";
-type Page = "connectors" | "memory" | null;
+type Page = "connectors" | "memory" | "browser" | null;
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -91,6 +92,7 @@ function App() {
   const [canSpeak, setCanSpeak] = useState(false);
   const [keyboard, setKeyboard] = useState(false);
   const [onboarding, setOnboarding] = useState<"unknown" | "needed" | "done">("unknown");
+  const [browserView, setBrowserView] = useState<{ mode: "task" | "free"; taskId?: string } | null>(null);
   const [signinName, setSigninName] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -191,8 +193,9 @@ function App() {
   }, [auth, api]);
 
   useNotificationTaps(useCallback((data: Record<string, unknown>) => {
-    setPage(null); setMenu(false); setActivity(false);
-    setTab(data.tab === "chat" || data.approval ? "chat" : "hub");
+    setMenu(false); setActivity(false);
+    setTab(data.tab === "chat" || data.approval || data.browser ? "chat" : "hub");
+    if (typeof data.browser === "string") { setBrowserView({ mode: "task", taskId: data.browser }); setPage("browser"); } else setPage(null);
   }, []));
 
   const decide = useCallback(async (id: string, decision: "allow" | "deny") => {
@@ -224,7 +227,10 @@ function App() {
     return <OnboardingScreen api={api} defaultName={signinName} onDone={(a) => { setAssistant(a); setOnboarding("done"); setTab("chat"); }} />;
   }
 
-  if (page === "connectors") return <SafeAreaView style={s.root} edges={["top"]}><Stars /><StatusBar style="light" /><ConnectorsScreen api={api} onBack={() => setPage(null)} /></SafeAreaView>;
+  if (page === "browser" && browserView) {
+    return <BrowserScreen api={api} mode={browserView.mode} taskId={browserView.taskId} onClose={() => { setPage(null); setBrowserView(null); }} />;
+  }
+  if (page === "connectors") return <SafeAreaView style={s.root} edges={["top"]}><Stars /><StatusBar style="light" /><ConnectorsScreen api={api} onBack={() => setPage(null)} onOpenBrowser={() => { setBrowserView({ mode: "free" }); setPage("browser"); }} /></SafeAreaView>;
   if (page === "memory") return <SafeAreaView style={s.root} edges={["top"]}><Stars /><StatusBar style="light" /><MemoryScreen api={api} onBack={() => setPage(null)} /></SafeAreaView>;
 
   const status = notice ?? (busy ? statusTitle(live?.steps ?? []) : connection === "open" ? null : "Reconnecting…");
@@ -260,7 +266,8 @@ function App() {
         ) : tab === "chat" ? (
           <ChatScreen assistant={assistant} messages={messages} live={live} busy={busy}
             onSend={(t) => socket.current?.send(t)} onStop={() => socket.current?.stop()}
-            card={browser ? <BrowserCard task={browser} onStop={() => { api.stopBrowserTask(browser.task_id).catch(() => {}); }} /> : null}
+            card={browser ? <BrowserCard task={browser} onStop={() => { api.stopBrowserTask(browser.task_id).catch(() => {}); }}
+              onOpen={(id) => { setBrowserView({ mode: "task", taskId: id }); setPage("browser"); }} /> : null}
             footer={approvals.length ? (
               <ApprovalCard approval={approvals[0]} busy={deciding === approvals[0].id} onDecide={(d) => decide(approvals[0].id, d)} />
             ) : null} />

@@ -13,7 +13,15 @@ export type Idea = { id: string; icon: string; title: string; body: string };
 export type Goal = { id: string; title: string; category: string; done: boolean; plan?: string[] };
 export type Approval = { id: string; kind: string; title: string; subtitle: string; details: { label: string; value: string }[]; decision: string | null };
 export type Connector = { provider: string; status: "connected" | "available"; configured: boolean; email: string | null };
-export type BrowserTask = { task_id: string; title: string; status: string; status_title: string; url: string; screenshot?: string };
+export type BrowserTask = { task_id: string; title: string; status: string; status_title: string; url: string; screenshot?: string; question?: string | null };
+export type BrowserLive = {
+  mode: "none" | "task" | "free"; task_id?: string; status?: string; status_title?: string; title?: string; question?: string | null;
+  can_control: boolean; url: string; screenshot: string; width: number; height: number; error?: string;
+};
+export type BrowserInput =
+  | { type: "tap"; x: number; y: number } | { type: "type"; text: string; submit?: boolean } | { type: "key"; key: string }
+  | { type: "scroll"; dy: number } | { type: "navigate"; url: string } | { type: "back" };
+export type SavedSite = { site: string; cookies: number; last_used_at: number | null; persistent: boolean };
 export type Hub = {
   greeting: string; stamp: string;
   brief: { ready: boolean; title: string; sub: string; text: string; kicker?: string };
@@ -80,6 +88,14 @@ export class Api {
   browserTasks() { return this.req<{ tasks: BrowserTask[]; cards: BrowserTask[] }>("/v1/browser/tasks"); }
   hub() { return this.req<Hub>("/v1/hub"); }
   voiceStatus() { return this.req<{ tts: boolean; voice_id: string }>("/v1/voice/status"); }
+  browserLive() { return this.req<BrowserLive>("/v1/browser/live"); }
+  browserOpen() { return this.req<BrowserLive>("/v1/browser/live/open", { method: "POST" }); }
+  browserClose() { return this.req<{ closed: boolean }>("/v1/browser/live/close", { method: "POST" }); }
+  browserInput(cmd: BrowserInput) { return this.req<BrowserLive>("/v1/browser/live/input", { method: "POST", body: JSON.stringify(cmd) }); }
+  browserTakeover(id: string) { return this.req<BrowserLive>(`/v1/browser/tasks/${id}/takeover`, { method: "POST" }); }
+  browserHandback(id: string, note: string) { return this.req<{ task_id: string; status: string }>(`/v1/browser/tasks/${id}/handback`, { method: "POST", body: JSON.stringify({ note }) }); }
+  browserLogins() { return this.req<{ sites: SavedSite[] }>("/v1/browser/logins"); }
+  browserForget(domain: string) { return this.req<{ forgot: string; sites: SavedSite[] }>("/v1/browser/logins/forget", { method: "POST", body: JSON.stringify({ domain }) }); }
   stopBrowserTask(id: string) { return this.req<{ task_id: string }>(`/v1/browser/tasks/${id}/stop`, { method: "POST" }); }
   onboard(body: { name: string; call_them: string; assistant: string; vibe: string; plate: string; timezone: string }) {
     return this.req<{ ok: boolean; assistant: string; call_them: string; timezone: string }>("/v1/onboarding", { method: "POST", body: JSON.stringify(body) });

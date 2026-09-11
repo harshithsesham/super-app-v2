@@ -28,7 +28,7 @@ from .memory.files import HomeMemory
 from .prompts import skills_catalog
 from .tools import local, memory_tools  # noqa: F401  registers handlers
 from .agent import subagents  # noqa: F401
-from .browser import worker as browser_worker, web as browser_web  # noqa: F401
+from .browser import worker as browser_worker, web as browser_web, live as browser_live  # noqa: F401
 from .agent.loop import Agent
 from .agent import subagents as subagent_mod
 from . import auth, db, hub, voice
@@ -373,8 +373,12 @@ class Room:
     def _on_event(self, kind: str, data: dict):
         if kind == "browser_step":
             # keep the latest card per task for late-joining clients; screenshots stay out of the event log
+            prev = self.browser_tasks.get(data["task_id"], {})
             self.browser_tasks[data["task_id"]] = dict(data, ts=time.time())
             self._send({"type": "browser", "task": data})
+            if data.get("status") == "needs_user" and prev.get("status") != "needs_user" and data.get("status_title") != "You're in control":
+                self.notify("Muse needs you in the browser", (data.get("title") or "A browser task") + " is waiting for you.",
+                            {"tab": "chat", "browser": data["task_id"]}, thread_id="browser")
             data = {k: v for k, v in data.items() if k != "screenshot"}
         rec = {"ts": time.time(), "kind": kind, "data": data}
         self.events.append(rec)
@@ -509,6 +513,133 @@ def browser_stop(task_id: str, user: str = Depends(current_user)):
         raise HTTPException(404, "no such task")
     t.stop()
     return {"task_id": task_id, "status": "stopped"}
+
+
+# ------------------------------------------------------- browser connector ----
+def _active_task(r: Room):
+    for t in browser_worker.TASKS.values():
+        if t.parent.id == r.agent.id and t.driver is not None and t.status in ("queued", "running", "needs_user"):
+            return t
+    return None
+
+
+def _live_state(r: Room) -> dict:
+    """What the app's live browser view shows: the task's page, a free session, or nothing."""
+    t = _active_task(r)
+    if t is not None:
+        base = {"mode": "task", "task_id": t.id, "status": t.status, "status_title": t.status_title, "title": t.title,
+                "question": t.question, "can_control": t.status == "needs_user"}
+        if t.status == "needs_user":
+            try:
+                return {**base, **t.command({"type": "state"}, timeout=20)}
+            except Exception:  # noqa: BLE001
+                pass
+        return {**base, "url": t.url, "screenshot": t.screenshot, **browser_live.VIEW}
+    s = browser_live.current(r.home)
+    if s is not None:
+        return {"mode": "free", "can_control": True, **s.command({"type": "state"}, timeout=20)}
+    return {"mode": "none", "can_control": False, "url": "", "title": "", "screenshot": "", **browser_live.VIEW}
+
+
+@app.get("/v1/browser/live")
+def browser_live_state(user: str = Depends(current_user)):
+    return _live_state(room_for(user))
+
+
+@app.post("/v1/browser/live/open")
+def browser_live_open(user: str = Depends(current_user)):
+    """Open the agent's browser for the user with no task running: sign into sites, check something."""
+    r = room_for(user)
+    if _active_task(r) is None:
+        try:
+            browser_live.open_session(r.home)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(503, f"could not open the browser: {e}")
+    return _live_state(r)
+
+
+@app.post("/v1/browser/live/close")
+def browser_live_close(user: str = Depends(current_user)):
+    r = room_for(user)
+    browser_live.close_for(r.home)
+    return {"closed": True}
+
+
+@app.post("/v1/browser/live/input")
+def browser_live_input(body: dict, user: str = Depends(current_user)):
+    """One gesture from the phone: tap, type, key, scroll, navigate, back."""
+    r = room_for(user)
+    cmd = body or {}
+    t = _active_task(r)
+    host = t if t is not None else browser_live.current(r.home)
+    if host is None:
+        raise HTTPException(409, "no browser is open")
+    if t is not None and t.status != "needs_user":
+        raise HTTPException(409, "Muse is driving this page; take over first")
+    try:
+        st = host.command(cmd, timeout=30)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"browser did not respond: {e}")
+    return {**_live_state(r), **{k: v for k, v in st.items() if k in ("url", "title", "screenshot", "error")}}
+
+
+@app.post("/v1/browser/tasks/{task_id}/takeover")
+def browser_takeover(task_id: str, user: str = Depends(current_user)):
+    r = room_for(user)
+    t = browser_worker.TASKS.get(task_id)
+    if not t or t.parent.id != r.agent.id:
+        raise HTTPException(404, "no such task")
+    try:
+        t.takeover()
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    for _ in range(60):   # the worker finishes its current step, then hands the page over
+        if t.status == "needs_user":
+            break
+        time.sleep(0.5)
+    return _live_state(r)
+
+
+@app.post("/v1/browser/tasks/{task_id}/handback")
+def browser_handback(task_id: str, body: dict, user: str = Depends(current_user)):
+    r = room_for(user)
+    t = browser_worker.TASKS.get(task_id)
+    if not t or t.parent.id != r.agent.id:
+        raise HTTPException(404, "no such task")
+    try:
+        t.handback(str((body or {}).get("note", "")))
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    return {"task_id": task_id, "status": "running"}
+
+
+def _cookie_host(r: Room):
+    t = _active_task(r)
+    if t is not None:
+        return t if t.status == "needs_user" else None   # a running worker owns the thread
+    return browser_live.current(r.home)
+
+
+@app.get("/v1/browser/logins")
+def browser_logins(user: str = Depends(current_user)):
+    r = room_for(user)
+    return {"sites": browser_live.logins(r.home, host=_cookie_host(r))}
+
+
+@app.post("/v1/browser/logins/forget")
+def browser_forget(body: dict, user: str = Depends(current_user)):
+    r = room_for(user)
+    domain = str((body or {}).get("domain", "")).strip()
+    if not domain:
+        raise HTTPException(400, "domain required")
+    t = _active_task(r)
+    if t is not None and t.status != "needs_user":
+        raise HTTPException(409, "a browser task is running; try again when it finishes")
+    try:
+        browser_live.forget(r.home, domain, host=t or browser_live.current(r.home))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"could not clear cookies: {e}")
+    return {"forgot": domain, "sites": browser_live.logins(r.home, host=_cookie_host(r))}
 
 
 @app.post("/v1/approvals/{approval_id}")

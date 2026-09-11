@@ -55,7 +55,7 @@ Without those env vars the app shows a sign-in screen asking for the server URL 
 - [x] Gmail connector: encrypted vault, OAuth connect flow, `bin/hatch_gws_cli` driving the ported skill, sends gated by approval cards (`superapp/connectors/`, `superapp/approvals.py`)
 - [x] Browser worker: Playwright driver with referenced-element snapshots, `browser_task` role, live Browser card, approval on checkout-like steps (`superapp/browser/`)
 - [x] Hub page and voice orb from the earlier app, fed by this runtime (`superapp/hub.py`, `superapp/voice.py`, `apps/mobile/src/screens/HubScreen.tsx`, `apps/mobile/src/ui/Orb.tsx`)
-- [ ] Browser credential grants and takeover
+- [x] Browser connector: live view of the agent's browser on the phone, take over a running task (sign-in, checkout, captcha) and hand back with a note, a free session to sign into sites the profile keeps, saved sign-ins listed and forgettable (`superapp/browser/live.py`, `apps/mobile/src/screens/BrowserScreen.tsx`)
 - [x] Persistence on the Muse schema: one Postgres database per user, transcript/tool/compaction/subagent/browser rows, restart checkpoints and recovery (`superapp/db.py`)
 - [x] Scheduler: cron jobs and event hooks with the captured tool contracts, worker roles, system jobs (hourly memory upkeep, daily brief) (`superapp/scheduler/`)
 - [x] Push notifications: APNs direct from the gateway, triggered by job results, hooks, and approvals when the app is closed (`superapp/cells/apns.py`, `apps/mobile/src/push.ts`)

@@ -15,6 +15,7 @@ from ..prompts import assembler
 from ..tools.registry import REGISTRY, ToolError
 from ..agent.loop import Agent
 from .driver import Driver
+from . import live
 
 TASKS: dict[str, "TaskRunner"] = {}
 _lock = threading.Lock()
@@ -38,8 +39,10 @@ class TaskRunner(threading.Thread):
         self.question: str | None = None
         self.step_count = 0
         self.created_at, self.updated_at = time.time(), time.time()
-        self.q: "queue.Queue[tuple[str, str]]" = queue.Queue()
+        self.q: "queue.Queue[tuple[str, object]]" = queue.Queue()
         self.driver: Driver | None = None
+        self.pause_requested = False    # the user asked to take over mid-run
+        self.last_touch = time.time()   # last user gesture while in control; keeps the browser open
         self.agent = Agent("browser_task", depth=parent.depth + 1, llm=parent.llm, memory=parent.memory, tz=parent.tz,
                            label=self.title, on_event=parent.on_event, parent=parent)
         self.agent.only_tools = {"muse.automation", "muse.browser_hand_off", "muse.visual_automation"}
@@ -91,13 +94,22 @@ class TaskRunner(threading.Thread):
         try:
             while True:
                 try:
-                    kind, payload = self.q.get(timeout=IDLE_CLOSE_S)
+                    kind, payload = self.q.get(timeout=60)
                 except queue.Empty:
-                    if self.status in ("running",):
+                    # keep the browser while the worker is running or the user is (or may be) in control
+                    if self.status == "running" or (self.status == "needs_user" and time.time() - self.last_touch < IDLE_CLOSE_S):
                         continue
                     break
                 if kind == "close":
                     break
+                if kind == "cmd":   # a gesture from the app while the user is in control
+                    cmd, reply = payload  # type: ignore[misc]
+                    self.last_touch = time.time()
+                    try:
+                        reply.put(live.execute(self.driver, cmd))
+                    except Exception as e:  # noqa: BLE001
+                        reply.put({"error": str(e)})
+                    continue
                 self.status, self.status_title = "running", "Working…"
                 self.emit(False)
                 self.agent.handoff = None  # type: ignore[attr-defined]
@@ -107,6 +119,15 @@ class TaskRunner(threading.Thread):
                     self.status, self.report = "failed", f"Browser worker error: {type(e).__name__}: {e}"
                     self.parent.deliver(f"[Browser Task Report] task_id={self.id} outcome=failed\n{self.report}")
                     self.emit(False)
+                    continue
+                if self.pause_requested:
+                    # the user took over: hold the page, no report; handback() resumes the worker
+                    self.pause_requested = False
+                    self.agent.closed = False
+                    self.status, self.status_title = "needs_user", "You're in control"
+                    self.question = None
+                    self.last_touch = time.time()
+                    self.emit(True)
                     continue
                 self._finish(text)
                 if self.status in ("completed", "failed", "stopped"):
@@ -127,6 +148,7 @@ class TaskRunner(threading.Thread):
         if outcome == "ask_for_information":
             self.status, self.status_title = "needs_user", "Needs your answer"
             self.question = ho.get("question") or self.report
+            self.last_touch = time.time()
         elif outcome == "failed":
             self.status, self.status_title = "failed", "Could not finish"
         else:
@@ -147,6 +169,35 @@ class TaskRunner(threading.Thread):
         self.q.put(("close", ""))
         self.emit(False)
 
+    # ------------------------------------------------------- live control ---
+    def command(self, cmd: dict, timeout: float = 30) -> dict:
+        """A gesture from the app. Only served between worker turns: take over first while it is running."""
+        if self.driver is None or self.status in ("completed", "failed", "stopped"):
+            raise RuntimeError("this task's browser is closed")
+        reply: queue.Queue = queue.Queue()
+        self.q.put(("cmd", (cmd, reply)))
+        return reply.get(timeout=timeout)
+
+    def takeover(self):
+        """Pause the worker after its current step and give the page to the user."""
+        if self.status == "running":
+            self.pause_requested = True
+            self.agent.closed = True   # the loop returns at the next round; run() turns that into needs_user
+        elif self.status == "needs_user":
+            self.status_title = "You're in control"
+            self.last_touch = time.time()
+            self.emit(False)
+        else:
+            raise RuntimeError(f"task is {self.status}")
+
+    def handback(self, note: str = ""):
+        if self.status != "needs_user":
+            raise RuntimeError(f"task is {self.status}, not waiting on you")
+        self.q.put(("run", "[The user took control of the browser and has handed it back]\n"
+                    + (f"Their note: {note.strip()}\n" if note.strip() else "")
+                    + "The page may have changed under you: take a fresh snapshot before acting, then continue the task.\n"
+                    f"Now: {assembler.time_lines(self.parent.tz)['time_tag']}"))
+
 
 # ---------------------------------------------------------- parent tools ---
 @REGISTRY.register("browser.spawn_task")
@@ -155,6 +206,7 @@ def spawn_task(instruction: str, start_url: str | None = None, title: str | None
     parent: Agent = _ctx["agent"]
     if parent.role != "chat":
         raise ToolError("only the main agent can operate the browser")
+    live.close_for(parent.memory.home)   # one Chromium per profile: a free session yields to the task
     t = TaskRunner(parent, instruction, start_url, title, allow_credentials)
     with _lock:
         TASKS[t.id] = t

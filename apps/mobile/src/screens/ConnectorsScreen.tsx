@@ -6,7 +6,7 @@ import * as WebBrowser from "expo-web-browser";
 import { Pressable } from "../ui/Tap";
 import { BackIcon } from "../ui/Icons";
 import { C, R } from "../theme";
-import type { Api, Connector, Skill } from "../api";
+import type { SavedSite, Api, Connector, Skill } from "../api";
 
 // Providers with a real connect flow in the daemon today. Gmail and Google Calendar
 // share one Google sign-in; connecting either runs the same consent.
@@ -25,8 +25,9 @@ const PRETTY: Record<string, string> = {
 };
 const CONNECTOR_SKILLS = new Set(Object.keys(PRETTY));
 
-export function ConnectorsScreen({ api, onBack }: { api: Api; onBack: () => void }) {
+export function ConnectorsScreen({ api, onBack, onOpenBrowser }: { api: Api; onBack: () => void; onOpenBrowser?: () => void }) {
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [sites, setSites] = useState<SavedSite[]>([]);
   const [live, setLive] = useState<Connector[]>([]);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
@@ -34,6 +35,7 @@ export function ConnectorsScreen({ api, onBack }: { api: Api; onBack: () => void
     try {
       const [sk, co] = await Promise.all([api.skills(), api.connectors()]);
       setSkills(sk.skills); setLive(co.connectors);
+      api.browserLogins().then((r) => setSites(r.sites)).catch(() => {});
     } catch {}
   }, [api]);
   useEffect(() => { load(); }, [load]);
@@ -91,6 +93,29 @@ export function ConnectorsScreen({ api, onBack }: { api: Api; onBack: () => void
         <View style={s.search}>
           <Text style={{ fontSize: 16, color: C.muted }}>⌕</Text>
           <TextInput style={s.searchInput} value={q} onChangeText={setQ} placeholder="Search connectors" placeholderTextColor={C.muted} />
+        </View>
+        <Text style={s.section}>Browser</Text>
+        <View style={s.card}>
+          <View style={[s.row, s.rowBorder]}>
+            <View style={s.logo}><Text style={{ fontSize: 20 }}>🌐</Text></View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.name}>Muse's browser</Text>
+              <Text style={s.email}>Sign into sites here once; it stays signed in for tasks.</Text>
+            </View>
+            <Pressable feel="control" onPress={onOpenBrowser}><Text style={s.connect}>Open</Text></Pressable>
+          </View>
+          {sites.length ? sites.slice(0, 12).map((site, i) => (
+            <View key={site.site} style={[s.row, i < Math.min(sites.length, 12) - 1 && s.rowBorder]}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.name}>{site.site}</Text>
+                <Text style={s.email}>{site.cookies} cookie{site.cookies === 1 ? "" : "s"}{site.last_used_at ? ` · used ${new Date(site.last_used_at * 1000).toLocaleDateString()}` : ""}</Text>
+              </View>
+              <Pressable feel="control" onPress={() => Alert.alert(`Forget ${site.site}?`, "Muse's browser will be signed out of this site.", [
+                { text: "Cancel", style: "cancel" },
+                { text: "Forget", style: "destructive", onPress: async () => { try { const r = await api.browserForget(site.site); setSites(r.sites); } catch {} } },
+              ])}><Text style={s.connect}>Forget</Text></Pressable>
+            </View>
+          )) : <Text style={s.none}>No saved sign-ins yet.</Text>}
         </View>
         <Text style={s.section}>Connected</Text>
         <View style={s.card}>
