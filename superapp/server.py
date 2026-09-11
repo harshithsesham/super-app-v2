@@ -346,6 +346,8 @@ class Room:
 
     # turns
     def run_turn(self, text: str | None):
+        if text is not None:
+            self.scheduler.note_activity()
         self._send({"type": "turn_start", "user_text": text})
         try:
             final = self.agent.run_turn(text)

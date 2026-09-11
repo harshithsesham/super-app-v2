@@ -23,36 +23,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # The cell user. Everything the agent touches (home, workspace, browser
 # profile, vault) is owned by it; Postgres runs as `postgres`; only the
-# supervisor is root.
+# supervisor is root. Files are copied already owned by it, and the venv is
+# chowned inside the layer that creates it, so no layer duplicates another.
 RUN useradd --create-home --uid 1000 --shell /bin/bash hatch
 
 WORKDIR /opt/superapp
-COPY pyproject.toml README.md ./
-COPY superapp ./superapp
-COPY skills ./skills
-COPY config ./config
-COPY bin ./bin
-COPY db ./db
-COPY scripts ./scripts
-COPY deploy/cell/entrypoint.sh /opt/superapp/entrypoint.sh
+COPY --chown=hatch:hatch pyproject.toml README.md ./
+COPY --chown=hatch:hatch superapp ./superapp
+COPY --chown=hatch:hatch skills ./skills
+COPY --chown=hatch:hatch config ./config
+COPY --chown=hatch:hatch bin ./bin
+COPY --chown=hatch:hatch db ./db
+COPY --chown=hatch:hatch scripts ./scripts
+COPY --chown=hatch:hatch --chmod=755 deploy/cell/entrypoint.sh /opt/superapp/entrypoint.sh
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
     FASTEMBED_CACHE_PATH=/opt/models \
     PATH=/usr/lib/postgresql/16/bin:$PATH
 
+# Only the headless shell of Chromium: the worker never runs headed. Models are
+# baked so a fresh cell never downloads on first boot.
 RUN python -m venv .venv && ./.venv/bin/pip install --no-cache-dir -e ".[memory,server]" \
     && ./.venv/bin/pip install --no-cache-dir httpx cryptography websockets playwright croniter "psycopg[binary]" psycopg_pool \
-    && ./.venv/bin/playwright install --with-deps chromium \
-    && chmod +x bin/hatch_gws_cli entrypoint.sh \
-    && rm -rf /var/lib/apt/lists/*
-
-# Bake the retrieval models so a fresh cell never downloads on first boot.
-RUN ./.venv/bin/python -c "\
+    && ./.venv/bin/playwright install --with-deps --only-shell chromium \
+    && ./.venv/bin/python -c "\
 from fastembed import TextEmbedding, SparseTextEmbedding; \
 from fastembed.rerank.cross_encoder import TextCrossEncoder; \
 TextEmbedding('sentence-transformers/all-MiniLM-L6-v2'); SparseTextEmbedding('Qdrant/bm25'); \
 TextCrossEncoder('jinaai/jina-reranker-v1-turbo-en')" \
-    && chmod -R a+rX /opt/models /opt/pw-browsers && chown -R hatch:hatch /opt/superapp
+    && chmod +x bin/hatch_gws_cli \
+    && chmod -R a+rX /opt/models /opt/pw-browsers && chown -R hatch:hatch /opt/superapp/.venv \
+    && rm -rf /var/lib/apt/lists/* /root/.cache /tmp/*
 
 ENV SUPERAPP_HOME_ROOT=/data/users \
     SUPERAPP_PORT=18792 \

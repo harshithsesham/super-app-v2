@@ -47,8 +47,7 @@ gosu postgres psql -U superapp -d postgres -tAc "select 1 from pg_database where
 
 echo "cell: user=$SUPERAPP_CELL_USER idle_exit=${SUPERAPP_IDLE_EXIT_SECS:-0}s"
 set +e
-gosu hatch env HOME=/home/hatch ./.venv/bin/uvicorn superapp.server:app \
-    --host :: --port "${SUPERAPP_PORT:-18792}" --log-level "${SUPERAPP_LOG_LEVEL:-warning}" &
+gosu hatch env HOME=/home/hatch SUPERAPP_LOG_LEVEL="${SUPERAPP_LOG_LEVEL:-warning}" ./.venv/bin/python -m superapp.serve &
 daemon=$!
 term() { kill -TERM "$daemon" 2>/dev/null; }
 trap 'term' TERM INT

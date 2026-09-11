@@ -105,7 +105,7 @@ Gateway env:
 SUPERAPP_CELLS=fly
 FLY_API_TOKEN=<fly tokens create deploy -a muse-cells>
 FLY_CELLS_APP=muse-cells
-FLY_CELLS_IMAGE=registry.fly.io/muse-cells:<label>
+FLY_CELLS_IMAGE=registry.fly.io/muse-cells:v3
 FLY_CELLS_REGION=ord
 FLY_CELLS_MEMORY_MB=2048            # shared-cpu-1x
 FLY_CELLS_VOLUME_GB=10

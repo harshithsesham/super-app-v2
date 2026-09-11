@@ -99,6 +99,7 @@ class Engine:
         self.hook_next: dict[str, float] = {}
         self.pool = ThreadPoolExecutor(max_workers=2)
         self.running: set[str] = set()
+        self.last_user_activity = time.time()   # updated by the room on every user turn; gates the system jobs
         self._stop = threading.Event()
         self._lock = threading.Lock()
         (self.home / "workspace/cron.d").mkdir(parents=True, exist_ok=True)
@@ -300,6 +301,10 @@ class Engine:
                         job["next_run_at_utc"] = next_run_utc(job, after=scheduled + 1)
                     if self.store:
                         self.store.upsert_job(job)
+                    why = self._should_skip(job, now)
+                    if why:
+                        self.room.on_event("scheduled_skip", {"job_id": job["id"], "title": job.get("title", job["id"]), "reason": why})
+                        continue
                     self.pool.submit(self._execute, job, scheduled, "schedule")
                 for h in list(self.hooks.values()):
                     if not h.get("enabled"):
@@ -310,6 +315,22 @@ class Engine:
             except Exception as e:  # noqa: BLE001
                 self.room.on_event("scheduler_error", {"error": f"{type(e).__name__}: {e}"})
             self._stop.wait(1.0)
+
+    def note_activity(self):
+        self.last_user_activity = time.time()
+
+    def _should_skip(self, job: dict, now: float) -> str | None:
+        """System jobs cost model calls; skip them when there is nothing new to work on."""
+        if not job.get("system"):
+            return None
+        if job["id"] == "memory-upkeep":
+            n = len(self.room.agent.transcript)
+            if n == job.get("_seen_len"):
+                return "no new conversation since the last run"
+            job["_seen_len"] = n
+        if job["id"] == "morning-brief" and now - self.last_user_activity > 7 * 86400:
+            return "user inactive for a week"
+        return None
 
     def stop(self):
         self._stop.set()
